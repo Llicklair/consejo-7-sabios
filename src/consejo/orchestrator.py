@@ -1,0 +1,524 @@
+"""Orquestador del Consejo — driver real para Fase 1.
+
+Reemplaza el `mock_driver` simple del bus por un consejo COMPLETO:
+- Escanea el repo
+- Construye briefings por expertise (per-sage)
+- Lanza N rondas con mecánica sign/reject
+- El juez sintetiza el plan
+- Empuja eventos al mismo bus que consume el animator
+
+Modos:
+- `mock`: no toca la API. Genera respuestas plausibles per-sabio basadas
+  en patrones predefinidos. Útil para testear flujo end-to-end sin coste.
+- `real`: usa anthropic SDK. Requiere `ANTHROPIC_API_KEY` env. (En curso —
+  scaffolding listo, implementación de llamadas pendiente.)
+
+El plan final se devuelve y opcionalmente se vuelca a `consejo-report.md`.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import random
+from dataclasses import asdict, dataclass, field
+from pathlib import Path
+
+from .sages import SAGES, Sage
+from .states import MAX_DEBATE_ROUNDS, EventBus, State, StateEvent
+from .translator import translate_atasco_to_en, translate_plan_to_es
+
+PROMPTS_DIR = Path(__file__).resolve().parent.parent.parent / "prompts"
+
+SCAN_EXTENSIONS = {".py", ".ts", ".tsx", ".js", ".jsx", ".md", ".toml",
+                   ".yaml", ".yml", ".json"}
+SCAN_EXCLUDE_DIRS = {".venv", "venv", "node_modules", ".git", "__pycache__",
+                     "build", "dist", ".pytest_cache", ".mypy_cache",
+                     ".ruff_cache", "assets"}
+
+
+@dataclass
+class Proposal:
+    title: str
+    rationale: str
+    blast_radius: str          # SAFE | MEDIUM | RISKY
+    files_touched: list[str]
+    proposed_by: str           # sage.name_en
+    proposed_round: int = 1
+
+
+@dataclass
+class SignatureRecord:
+    sage_id: str
+    signed: bool
+    critique: str = ""
+    amendments: list[Proposal] = field(default_factory=list)
+
+
+# ---------- Project scanning ----------
+
+def scan_project(repo: Path, max_files: int = 80,
+                 max_bytes_per_file: int = 4000) -> list[tuple[str, str]]:
+    """Recolecta archivos del repo (Python/TS/MD/configs) limitando tamaño."""
+    files: list[tuple[str, str]] = []
+    for p in sorted(repo.rglob("*")):
+        if any(d in p.parts for d in SCAN_EXCLUDE_DIRS):
+            continue
+        if not p.is_file() or p.suffix not in SCAN_EXTENSIONS:
+            continue
+        try:
+            content = p.read_text(encoding="utf-8", errors="ignore")[:max_bytes_per_file]
+            files.append((str(p.relative_to(repo)), content))
+            if len(files) >= max_files:
+                break
+        except Exception:
+            continue
+    return files
+
+
+def build_briefing(files: list[tuple[str, str]],
+                   for_sage: Sage | None = None,
+                   max_files_in_briefing: int = 25,
+                   max_chars_per_file: int = 1200) -> str:
+    """Briefing en EN. Si `for_sage` se da, sesga hacia archivos de su axis."""
+    out: list[str] = ["# Project briefing", ""]
+    if for_sage:
+        out.append(f"## Filtered for {for_sage.name_en}")
+        out.append(f"_{for_sage.expertise_en}_")
+        out.append("")
+    out.append(f"## {len(files)} files scanned. Showing top {max_files_in_briefing}.")
+    for path, content in files[:max_files_in_briefing]:
+        out.append(f"\n### `{path}`")
+        out.append("```")
+        out.append(content[:max_chars_per_file])
+        out.append("```")
+    return "\n".join(out)
+
+
+def render_sage_prompt(sage: Sage) -> str:
+    template = (PROMPTS_DIR / "sage_template.md").read_text(encoding="utf-8")
+    return (template
+            .replace("{{name_en}}", sage.name_en)
+            .replace("{{expertise_en}}", sage.expertise_en)
+            .replace("{{voice_en}}", sage.voice_en)
+            .replace("{{foil_en}}", sage.foil_en))
+
+
+def render_judge_prompt() -> str:
+    return (PROMPTS_DIR / "judge.md").read_text(encoding="utf-8")
+
+
+# ---------- Mock responses (patrones predefinidos por sabio) ----------
+
+_MOCK_PROPOSALS_BY_SAGE: dict[str, list[tuple]] = {
+    "arquitecto": [
+        ("Extract repository layer from auth module",
+         "Auth currently mixes handlers, services and DB access; the layered split exposes the flow.",
+         "MEDIUM", ["auth.py"]),
+        ("Move shared types into a dedicated types package",
+         "Type duplicates across services cause drift and silent bugs.",
+         "SAFE", ["types/", "services/"]),
+    ],
+    "conservador": [
+        ("Add integration tests before touching production code",
+         "We shouldn't refactor without a real net first. The mocked tests aren't catching regressions.",
+         "SAFE", ["tests/integration/"]),
+        ("Pin major versions of runtime dependencies",
+         "Last unpinned upgrade broke 2 services overnight. Stop the bleeding first.",
+         "SAFE", ["pyproject.toml"]),
+    ],
+    "modernizador": [
+        ("Migrate from requests to httpx with async support",
+         "Other services moved last quarter; this is the last blocker for the unified client.",
+         "MEDIUM", ["client.py", "tests/test_client.py"]),
+        ("Replace custom retry decorator with tenacity",
+         "Battle-tested lib; our implementation has edge cases around timeout cancellation.",
+         "SAFE", ["utils/retry.py"]),
+    ],
+    "simplificador": [
+        ("Delete the 4 wrapper functions in helpers/",
+         "They each call only the next function in a chain. Inline them; the API public surface shrinks.",
+         "SAFE", ["helpers/"]),
+        ("Collapse 3-class Serializer hierarchy into one function",
+         "Inheritance adds nothing here — only one concrete subclass exists.",
+         "MEDIUM", ["serializer.py"]),
+    ],
+    "guardian": [
+        ("Add input validation to /api/upload (size, mime-type, magic bytes)",
+         "Endpoint currently accepts any payload; trivial DoS / RCE surface.",
+         "SAFE", ["api/upload.py"]),
+        ("Audit-log failed auth attempts only (not successes)",
+         "Success logs flood disk and bury the actual signal. Failures are what you want to see.",
+         "SAFE", ["auth.py"]),
+    ],
+    "optimizador": [
+        ("Cache verify_token in memory (TTL = jwt_exp - 5s)",
+         "Hot path. Benchmark shows it's 30% of request CPU time under load.",
+         "MEDIUM", ["auth.py"]),
+        ("Replace O(n^2) dedup in import job with a set",
+         "Job times out above 100k rows; trivial fix and big win.",
+         "SAFE", ["jobs/import.py"]),
+    ],
+    "embajador": [
+        ("Define a documented AuthError code catalog",
+         "Clients receive cryptic 401s with no context. Real teams have been blocked for hours by this.",
+         "SAFE", ["auth.py", "docs/errors.md"]),
+        ("Rename get_x_or_default to x_or_else for clarity",
+         "Current name is ambiguous and conflicts with stdlib conventions.",
+         "SAFE", ["utils/"]),
+    ],
+}
+
+
+def _mock_propose(sage: Sage, round_num: int, seed: int) -> list[Proposal]:
+    rng = random.Random(hash(sage.id) + round_num + seed)
+    options = _MOCK_PROPOSALS_BY_SAGE.get(sage.id, [])
+    if not options:
+        return []
+    k = min(len(options), rng.randint(1, 2))
+    chosen = rng.sample(options, k)
+    return [Proposal(t, r, br, list(ft), sage.name_en, round_num)
+            for (t, r, br, ft) in chosen]
+
+
+def _mock_sign_decision(sage: Sage, round_num: int,
+                        all_proposals: list[Proposal],
+                        seed: int, total_rounds_planned: int) -> SignatureRecord:
+    """Probabilidad de firmar crece con la ronda. Última ronda fuerza firma."""
+    rng = random.Random(hash(sage.id) + round_num * 1000 + seed)
+    if round_num >= total_rounds_planned:
+        return SignatureRecord(sage_id=sage.id, signed=True)
+    p_sign = min(0.92, 0.15 + round_num * 0.20)
+    if rng.random() < p_sign:
+        return SignatureRecord(sage_id=sage.id, signed=True)
+    return SignatureRecord(
+        sage_id=sage.id, signed=False,
+        critique=(f"From the {sage.name_en}'s axis, the current plan "
+                  f"under-weights my concerns ({sage.expertise_en[:60]}...)."),
+        amendments=_mock_propose(sage, round_num + 100, seed)[:1],
+    )
+
+
+def _mock_judge_synthesis(atasco: str, proposals: list[Proposal],
+                          signatures: dict[str, SignatureRecord],
+                          rounds_used: int) -> dict:
+    # Deduplicación naive: agrupar por título exacto
+    by_title: dict[str, dict] = {}
+    for p in proposals:
+        if p.title not in by_title:
+            by_title[p.title] = {
+                "title": p.title,
+                "rationale": p.rationale,
+                "blast_radius": p.blast_radius,
+                "files_touched": p.files_touched,
+                "supporting_sages": [p.proposed_by],
+                "auto_executable": p.blast_radius == "SAFE",
+            }
+        else:
+            t = by_title[p.title]
+            if p.proposed_by not in t["supporting_sages"]:
+                t["supporting_sages"].append(p.proposed_by)
+
+    grouped = list(by_title.values())
+    # Ordenar: SAFE primero, luego MEDIUM, luego RISKY
+    order = {"SAFE": 0, "MEDIUM": 1, "RISKY": 2}
+    grouped.sort(key=lambda t: order.get(t["blast_radius"], 99))
+    for i, t in enumerate(grouped, start=1):
+        t["priority"] = i
+
+    unanimous = bool(signatures) and all(s.signed for s in signatures.values())
+
+    return {
+        "atasco": atasco,
+        "summary": (
+            f"After {rounds_used} round(s) of debate, the council reached "
+            f"{'unanimous ' if unanimous else 'majority '}consensus. The plan "
+            f"groups {sum(1 for t in grouped if t['blast_radius']=='SAFE')} SAFE, "
+            f"{sum(1 for t in grouped if t['blast_radius']=='MEDIUM')} MEDIUM, "
+            f"and {sum(1 for t in grouped if t['blast_radius']=='RISKY')} RISKY tasks."
+        ),
+        "rounds_used": rounds_used,
+        "unanimous": unanimous,
+        "tasks": grouped,
+        "unresolved_disagreements": [
+            {"sage": sid, "critique": rec.critique}
+            for sid, rec in signatures.items() if not rec.signed
+        ],
+    }
+
+
+# ---------- Real-mode scaffolding (anthropic SDK) ----------
+
+async def _real_propose(sage: Sage, briefing: str, atasco: str,
+                        round_num: int, proposals_so_far: list[Proposal]) -> list[Proposal]:
+    """Llamada real a Claude. Requiere ANTHROPIC_API_KEY."""
+    try:
+        from anthropic import AsyncAnthropic
+    except ImportError as e:
+        raise RuntimeError("anthropic SDK no instalado. `pip install anthropic`.") from e
+    client = AsyncAnthropic()
+    system = render_sage_prompt(sage)
+    user_msg = (
+        f"<atasco>{atasco}</atasco>\n\n"
+        f"<round>{round_num}</round>\n\n"
+        f"<briefing>\n{briefing}\n</briefing>\n\n"
+        f"<proposals>\n{json.dumps([asdict(p) for p in proposals_so_far], indent=2)}\n</proposals>\n\n"
+        f"Output JSON only."
+    )
+    resp = await client.messages.create(
+        model="claude-haiku-4-5",
+        max_tokens=2000,
+        system=system,
+        messages=[{"role": "user", "content": user_msg}],
+    )
+    text = resp.content[0].text
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        # Fallback: el modelo a veces envuelve en markdown
+        text = text.strip("` \n")
+        if text.startswith("json"):
+            text = text[4:].strip()
+        data = json.loads(text)
+    return [Proposal(p["title"], p["rationale"], p["blast_radius"],
+                     p.get("files_touched", []), sage.name_en, round_num)
+            for p in data.get("proposals", data.get("amendments", []))]
+
+
+async def _real_judge(atasco: str, proposals: list[Proposal],
+                      signatures: dict, rounds_used: int) -> dict:
+    try:
+        from anthropic import AsyncAnthropic
+    except ImportError as e:
+        raise RuntimeError("anthropic SDK no instalado.") from e
+    client = AsyncAnthropic()
+    user_msg = (
+        f"<atasco>{atasco}</atasco>\n\n"
+        f"<rounds_used>{rounds_used}</rounds_used>\n\n"
+        f"<proposals>{json.dumps([asdict(p) for p in proposals], indent=2)}</proposals>\n\n"
+        f"<signatures>{json.dumps({k: asdict(v) for k, v in signatures.items()}, indent=2)}</signatures>\n\n"
+        f"Output JSON only."
+    )
+    resp = await client.messages.create(
+        model="claude-opus-4-7",
+        max_tokens=4000,
+        system=render_judge_prompt(),
+        messages=[{"role": "user", "content": user_msg}],
+    )
+    text = resp.content[0].text.strip("` \n")
+    if text.startswith("json"):
+        text = text[4:].strip()
+    return json.loads(text)
+
+
+# ---------- Main orchestrator ----------
+
+async def run_council(atasco: str, repo: Path, bus: EventBus,
+                      mode: str = "mock",
+                      max_rounds: int = MAX_DEBATE_ROUNDS,
+                      target_rounds: int = 3,
+                      speed: float = 1.0,
+                      seed: int | None = None,
+                      atasco_lang: str = "es") -> dict:
+    """Ejecuta el consejo completo y empuja eventos al bus para el animator.
+
+    `atasco_lang`: idioma del atasco del usuario ('es' o 'en'). Si es 'es' y
+    mode=='real', se traduce a EN antes de pasarlo a los sabios. El plan final
+    vuelve a ES para el reporte (con el original EN preservado).
+    """
+    rng_seed = seed if seed is not None else random.randint(0, 99999)
+    n_sages = len(SAGES)
+
+    async def emit(state: State, **kw) -> None:
+        await bus.publish(StateEvent(state=state, **kw))
+
+    await emit(State.ENTRANDO)
+    await asyncio.sleep(4.0 / speed)
+    await emit(State.SENTANDOSE)
+    await asyncio.sleep(1.5 / speed)
+
+    # === ANALIZANDO ===
+    await emit(State.ANALIZANDO)
+    # Traduce el atasco a EN para los sabios (no-op en mock)
+    atasco_es_original = atasco
+    if atasco_lang == "es":
+        atasco_en = await translate_atasco_to_en(atasco, mode=mode)
+    else:
+        atasco_en = atasco
+    files = scan_project(repo)
+    briefings = {s.id: build_briefing(files, for_sage=s) for s in SAGES}
+    await asyncio.sleep(6.0 / speed)
+
+    # === DEBATE rounds ===
+    all_proposals: list[Proposal] = []
+    signatures: dict[str, SignatureRecord] = {}
+    signed_ids: set[str] = set()
+    used_rounds = 0
+
+    for r in range(1, max_rounds + 1):
+        used_rounds = r
+        new_signs_idx: list[int] = []
+
+        if r == 1:
+            # Round 1: cada sabio propone
+            for s in SAGES:
+                if mode == "mock":
+                    props = _mock_propose(s, r, rng_seed)
+                else:
+                    props = await _real_propose(s, briefings[s.id], atasco_en, r, all_proposals)
+                all_proposals.extend(props)
+        else:
+            # Round 2+: cada sabio firma o propone enmiendas
+            for s in SAGES:
+                if s.id in signed_ids:
+                    continue
+                if mode == "mock":
+                    rec = _mock_sign_decision(s, r, all_proposals, rng_seed, target_rounds)
+                else:
+                    # Real mode: usa _real_propose para obtener sign+amendments
+                    # (scaffolding — simplificado por ahora)
+                    props = await _real_propose(s, briefings[s.id], atasco_en, r, all_proposals)
+                    rec = SignatureRecord(
+                        sage_id=s.id, signed=len(props) == 0,
+                        amendments=props,
+                    )
+                signatures[s.id] = rec
+                if rec.signed:
+                    signed_ids.add(s.id)
+                    new_signs_idx.append(SAGES.index(s))
+                else:
+                    all_proposals.extend(rec.amendments)
+
+        await emit(
+            State.DEBATE,
+            round_num=r,
+            payload={
+                "signed_this_round": new_signs_idx,
+                "total_signed": [i for i, s in enumerate(SAGES) if s.id in signed_ids],
+            },
+        )
+        await asyncio.sleep(3.5 / speed)
+
+        # Convergencia: todos firmados
+        if len(signed_ids) == n_sages:
+            break
+
+    # === JUEZ ===
+    await emit(State.JUEZ)
+    if mode == "mock":
+        plan_en = _mock_judge_synthesis(atasco_en, all_proposals, signatures, used_rounds)
+    else:
+        plan_en = await _real_judge(atasco_en, all_proposals, signatures, used_rounds)
+    # Traduce campos visibles a ES preservando el plan original (EN) para auditar
+    plan = await translate_plan_to_es(plan_en, mode=mode)
+    plan["atasco_es"] = atasco_es_original
+    plan["atasco_en"] = atasco_en
+    await asyncio.sleep(3.0 / speed)
+
+    # === ACUERDO → LEVANTANDOSE → SALIENDO → REPORTE ===
+    await emit(State.ACUERDO)
+    await asyncio.sleep(2.0 / speed)
+    await emit(State.LEVANTANDOSE)
+    await asyncio.sleep(1.5 / speed)
+    await emit(State.SALIENDO)
+    await asyncio.sleep(4.0 / speed)
+    await emit(State.REPORTE, payload={"plan": plan})
+
+    return plan
+
+
+def render_plan_markdown(plan: dict, execution: dict | None = None) -> str:
+    """Reporte bilingüe: resumen ES (lo que lee el usuario) + transcripción EN
+    (auditabilidad — lo que dijeron de verdad los sabios). Si `execution` se
+    pasa (resultado de executor.execute_safe_tasks), incluye la sección
+    de tareas aplicadas con sus commits."""
+    atasco_es = plan.get("atasco_es", plan.get("atasco", "unknown"))
+    atasco_en = plan.get("atasco_en", "")
+    lines: list[str] = [
+        "# Consejo de los 7 Sabios — Reporte",
+        "",
+        f"**Atasco (ES):** {atasco_es}",
+    ]
+    if atasco_en and atasco_en != atasco_es:
+        lines.append(f"**Atasco (EN):** {atasco_en}")
+    lines += [
+        f"**Rondas usadas:** {plan['rounds_used']}",
+        f"**Unánime:** {'sí' if plan['unanimous'] else 'no'}",
+        "",
+        "## Resumen ejecutivo",
+        "",
+        plan["summary"],
+        "",
+        "## Plan priorizado",
+        "",
+        "| # | Tarea | Sabios | Blast radius | Auto |",
+        "|---|-------|--------|--------------|------|",
+    ]
+    for t in plan["tasks"]:
+        sages = ", ".join(t.get("supporting_sages", []))
+        auto = "✅" if t.get("auto_executable") else "⛔"
+        lines.append(
+            f"| {t['priority']} | **{t['title']}** | {sages} | "
+            f"`{t['blast_radius']}` | {auto} |"
+        )
+
+    # Sección de ejecución (si modo auto se ejecutó)
+    if execution:
+        lines += ["", "## Tareas aplicadas (modo auto)", ""]
+        if execution["commits"]:
+            lines.append(f"Rama creada: `{execution['branch_name']}` "
+                         f"(rama origen: `{execution['original_branch']}`)")
+            if execution.get("snapshot_hash"):
+                lines.append(f"\nSnapshot pre-consejo: `{execution['snapshot_hash']}`")
+            lines.append("")
+            lines.append("| # | Tarea | Sabio | Commit | Blast |")
+            lines.append("|---|-------|-------|--------|-------|")
+            for i, c in enumerate(execution["commits"], 1):
+                lines.append(f"| {i} | {c['task_title']} | {c['sage']} | "
+                             f"`{c['hash']}` | `{c['blast_radius']}` |")
+            lines.append("")
+            lines.append(f"Total: {len(execution['commits'])} commits aplicados. "
+                         f"`git merge {execution['branch_name']}` para integrar.")
+        else:
+            lines.append(execution.get("note", "Sin tareas SAFE para auto-ejecutar."))
+        if execution.get("skipped"):
+            lines.append("")
+            lines.append(f"**{len(execution['skipped'])} tareas pendientes** "
+                         "(MEDIUM/RISKY) — revisión manual requerida en el reporte arriba.")
+
+    # Disensos
+    if plan.get("unresolved_disagreements"):
+        lines += ["", "## Disensos no resueltos", ""]
+        for d in plan["unresolved_disagreements"]:
+            who = d.get("sage", d.get("topic", "?"))
+            what = d.get("critique", d.get("judge_call", ""))
+            lines.append(f"- **{who}**: {what}")
+
+    # Transcripción original en EN (auditabilidad)
+    original_en = plan.get("_original_en")
+    if original_en:
+        lines += [
+            "",
+            "---",
+            "",
+            "## Transcripción original (EN)",
+            "",
+            "_Lo que los sabios dijeron literalmente, antes de la traducción._",
+            "",
+            "### Executive summary",
+            "",
+            original_en.get("summary", ""),
+            "",
+            "### Original tasks",
+            "",
+            "| # | Title | Supporting | Blast | Auto |",
+            "|---|-------|------------|-------|------|",
+        ]
+        for t in original_en.get("tasks", []):
+            sages = ", ".join(t.get("supporting_sages", []))
+            auto = "✅" if t.get("auto_executable") else "⛔"
+            lines.append(
+                f"| {t['priority']} | **{t['title']}** | {sages} | "
+                f"`{t['blast_radius']}` | {auto} |"
+            )
+    return "\n".join(lines)
