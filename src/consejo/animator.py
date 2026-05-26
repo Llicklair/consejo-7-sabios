@@ -190,6 +190,18 @@ def _ease_out(t: float) -> float:
     return 1 - (1 - t) ** 3
 
 
+def _walk_view(dx: int, dy: int) -> str:
+    """Pick sprite view from a displacement vector. Horizontal dominates."""
+    if abs(dx) >= abs(dy):
+        return "profile_r" if dx > 0 else "profile_l"
+    return "front" if dy > 0 else "back"
+
+
+def _walk_bob(t: float) -> int:
+    """Vertical pixels-up offset for the walking gait at ~2 steps/sec."""
+    return int(abs(math.sin(t * 6.0)) * 2)
+
+
 def _apply_fire_frame(canvas: Image.Image, t_total: float) -> None:
     """Sobreescribe la chimenea con el frame actual de fuego."""
     frames = _fire_frames()
@@ -384,8 +396,13 @@ def render_frame(state: State, t_in_state: float, total_dur: float,
             local = max(0.0, (progress - stagger) / max(0.001, 1 - stagger))
             if local <= 0:
                 continue
-            xy = _lerp_xy(DOOR_SPRITE_XY, SEATS[seat_idx][1], local)
-            canvas.paste(_sprite(sage.id), xy, _sprite(sage.id))
+            start_xy = DOOR_SPRITE_XY
+            end_xy = SEATS[seat_idx][1]
+            xy = _lerp_xy(start_xy, end_xy, local)
+            view = _walk_view(end_xy[0] - start_xy[0], end_xy[1] - start_xy[1])
+            bob = _walk_bob(t_total) if local < 0.98 else 0
+            sp = _sprite(sage.id, view=view)
+            canvas.paste(sp, (xy[0], xy[1] - bob), sp)
         return _apply_pulsing_lights(canvas, t_total, include_decor=True)
 
     # SALIENDO: sabios caminan hacia la puerta
@@ -397,8 +414,13 @@ def render_frame(state: State, t_in_state: float, total_dur: float,
             sage = SAGES[sage_idx]
             stagger = seat_idx / len(SAGES) * 0.4
             local = max(0.0, (progress - stagger) / max(0.001, 1 - stagger))
-            xy = _lerp_xy(SEATS[seat_idx][1], DOOR_SPRITE_XY, local)
-            canvas.paste(_sprite(sage.id), xy, _sprite(sage.id))
+            start_xy = SEATS[seat_idx][1]
+            end_xy = DOOR_SPRITE_XY
+            xy = _lerp_xy(start_xy, end_xy, local)
+            view = _walk_view(end_xy[0] - start_xy[0], end_xy[1] - start_xy[1])
+            bob = _walk_bob(t_total) if 0.02 < local < 0.98 else 0
+            sp = _sprite(sage.id, view=view)
+            canvas.paste(sp, (xy[0], xy[1] - bob), sp)
         return _apply_pulsing_lights(canvas, t_total, include_decor=True)
 
     # REPORTE: fade-out + chimenea agonizando

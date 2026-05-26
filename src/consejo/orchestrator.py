@@ -76,18 +76,56 @@ def scan_project(repo: Path, max_files: int = 80,
     return files
 
 
+SAGE_KEYWORDS: dict[str, list[str]] = {
+    "arquitecto":    ["class ", "interface", "abstract", "import ", "from ",
+                      "module", "boundary", "decoupl", "layer"],
+    "conservador":   ["test", "version", "deprecat", "compat", "lock",
+                      "pin ", "migration", "fragile", "rollback"],
+    "modernizador":  ["async ", "await ", "typing", "TypeAlias", "match ",
+                      "@override", "Protocol", "PEP", "type[", "| None"],
+    "simplificador": ["TODO", "FIXME", "deprecated", "unused", "helper",
+                      "wrapper", "duplicate", "legacy"],
+    "guardian":      ["except", "validate", "sanitize", "auth", "permission",
+                      "raise ", "security", "injection", "shell=", "eval("],
+    "optimizador":   ["cache", "perf", "benchmark", "memo", "lazy",
+                      "expensive", " for ", "while ", "O(n", "Image.new"],
+    "embajador":     ["argparse", "help=", "README", "error", "log",
+                      "ValueError", "docs/", "CLI", "click", "typer"],
+    "disenador":     ["color", "style", "format", "layout", "render",
+                      "draw", "pixel", "frame", "RGBA", "ImageDraw"],
+    "estratega":     ["README", "ARCHITECTURE", "vision", "scope",
+                      "roadmap", "user", "stakeholder", "milestone"],
+}
+
+
+def _score_file_for_sage(content: str, keywords: list[str]) -> int:
+    lc = content.lower()
+    return sum(lc.count(k.lower()) for k in keywords)
+
+
 def build_briefing(files: list[tuple[str, str]],
                    for_sage: Sage | None = None,
                    max_files_in_briefing: int = 25,
                    max_chars_per_file: int = 1200) -> str:
-    """Briefing en EN. Si `for_sage` se da, sesga hacia archivos de su axis."""
+    """Briefing en EN. Si `for_sage` se da y aparece en SAGE_KEYWORDS,
+    los archivos se ranquean por densidad de keywords del eje del sabio
+    y se queda con los top N. Sin sage o sin keywords: slice alfabético."""
     out: list[str] = ["# Project briefing", ""]
-    if for_sage:
+    keywords = SAGE_KEYWORDS.get(for_sage.id) if for_sage else None
+    if for_sage and keywords:
+        scored = sorted(files,
+                        key=lambda fp: _score_file_for_sage(fp[1], keywords),
+                        reverse=True)
+        selected = scored[:max_files_in_briefing]
         out.append(f"## Filtered for {for_sage.name_en}")
         out.append(f"_{for_sage.expertise_en}_")
+        out.append(f"Top {len(selected)} of {len(files)} files, ranked by "
+                   f"density of axis keywords ({', '.join(keywords[:5])}, ...).")
         out.append("")
-    out.append(f"## {len(files)} files scanned. Showing top {max_files_in_briefing}.")
-    for path, content in files[:max_files_in_briefing]:
+    else:
+        selected = files[:max_files_in_briefing]
+        out.append(f"## {len(files)} files scanned. Showing top {len(selected)}.")
+    for path, content in selected:
         out.append(f"\n### `{path}`")
         out.append("```")
         out.append(content[:max_chars_per_file])
@@ -170,20 +208,36 @@ _MOCK_PROPOSALS_BY_SAGE: dict[str, list[tuple]] = {
 }
 
 
-def _mock_propose(sage: Sage, round_num: int, seed: int) -> list[Proposal]:
+def _mock_propose(sage: Sage, round_num: int, seed: int,
+                  scanned_files: list[tuple[str, str]] | None = None) -> list[Proposal]:
+    """Mock proposer: picks 1-2 canned items from _MOCK_PROPOSALS_BY_SAGE.
+
+    If `scanned_files` is provided, the canned `files_touched` placeholders
+    (e.g. 'auth.py') are replaced with real files from the actual repo, so
+    the mock report at least cites paths that exist.
+    """
     rng = random.Random(hash(sage.id) + round_num + seed)
     options = _MOCK_PROPOSALS_BY_SAGE.get(sage.id, [])
     if not options:
         return []
     k = min(len(options), rng.randint(1, 2))
     chosen = rng.sample(options, k)
-    return [Proposal(t, r, br, list(ft), sage.name_en, round_num)
-            for (t, r, br, ft) in chosen]
+    real_paths = [fp[0] for fp in scanned_files] if scanned_files else []
+    results: list[Proposal] = []
+    for (t, r, br, canned_ft) in chosen:
+        if real_paths:
+            n = max(1, min(len(real_paths), len(canned_ft) or 1))
+            ft = rng.sample(real_paths, n)
+        else:
+            ft = list(canned_ft)
+        results.append(Proposal(t, r, br, ft, sage.name_en, round_num))
+    return results
 
 
 def _mock_sign_decision(sage: Sage, round_num: int,
                         all_proposals: list[Proposal],
-                        seed: int, total_rounds_planned: int) -> SignatureRecord:
+                        seed: int, total_rounds_planned: int,
+                        scanned_files: list[tuple[str, str]] | None = None) -> SignatureRecord:
     """Probabilidad de firmar crece con la ronda. Última ronda fuerza firma."""
     rng = random.Random(hash(sage.id) + round_num * 1000 + seed)
     if round_num >= total_rounds_planned:
@@ -195,7 +249,8 @@ def _mock_sign_decision(sage: Sage, round_num: int,
         sage_id=sage.id, signed=False,
         critique=(f"From the {sage.name_en}'s axis, the current plan "
                   f"under-weights my concerns ({sage.expertise_en[:60]}...)."),
-        amendments=_mock_propose(sage, round_num + 100, seed)[:1],
+        amendments=_mock_propose(sage, round_num + 100, seed,
+                                 scanned_files=scanned_files)[:1],
     )
 
 
@@ -431,7 +486,7 @@ async def run_council(atasco: str, repo: Path, bus: EventBus,
             # Round 1: cada sabio propone
             for s in SAGES:
                 if mode == "mock":
-                    props = _mock_propose(s, r, rng_seed)
+                    props = _mock_propose(s, r, rng_seed, scanned_files=files)
                 else:
                     props = await _real_propose(s, briefings[s.id], atasco_en, r, all_proposals)
                 all_proposals.extend(props)
@@ -441,7 +496,8 @@ async def run_council(atasco: str, repo: Path, bus: EventBus,
                 if s.id in signed_ids:
                     continue
                 if mode == "mock":
-                    rec = _mock_sign_decision(s, r, all_proposals, rng_seed, target_rounds)
+                    rec = _mock_sign_decision(s, r, all_proposals, rng_seed,
+                                              target_rounds, scanned_files=files)
                 else:
                     # Real mode: usa _real_propose para obtener sign+amendments
                     # (scaffolding — simplificado por ahora)
