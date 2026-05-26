@@ -27,7 +27,8 @@ from .states import MAX_DEBATE_ROUNDS, EventBus, State
 def _build_driver(atasco: str, repo: Path, mode: str, speed: float,
                   target_rounds: int, seed: int | None,
                   execute_mode: str = "none",
-                  max_execute_tasks: int = 10):
+                  max_execute_tasks: int = 10,
+                  cc_model: str = "sonnet"):
     """Devuelve una corutina (bus) -> None lista para pasar al animator.
 
     execute_mode: 'none' | 'auto' | 'manual'
@@ -43,6 +44,7 @@ def _build_driver(atasco: str, repo: Path, mode: str, speed: float,
             target_rounds=target_rounds,
             speed=speed,
             seed=seed,
+            cc_model=cc_model,
         )
         # Modo auto: crear rama + commitear SAFE tasks
         execution = None
@@ -64,11 +66,13 @@ def _build_driver(atasco: str, repo: Path, mode: str, speed: float,
 async def _run_headless(atasco: str, repo: Path, mode: str, speed: float,
                         target_rounds: int, seed: int | None,
                         execute_mode: str = "none",
-                        max_execute_tasks: int = 10) -> Path:
+                        max_execute_tasks: int = 10,
+                        cc_model: str = "sonnet") -> Path:
     bus = EventBus()
     driver = _build_driver(atasco, repo, mode, speed, target_rounds, seed,
                            execute_mode=execute_mode,
-                           max_execute_tasks=max_execute_tasks)
+                           max_execute_tasks=max_execute_tasks,
+                           cc_model=cc_model)
 
     async def consume_print() -> None:
         async for ev in bus.consume():
@@ -98,10 +102,16 @@ def main() -> None:
                         help="Descripción del problema a debatir")
     parser.add_argument("--repo", type=Path, default=Path.cwd(),
                         help="Ruta del repo a analizar (default: cwd)")
-    parser.add_argument("--mode", choices=["mock", "real"], default="mock",
-                        help="mock = sin API · real = anthropic SDK")
+    parser.add_argument("--mode", choices=["mock", "real", "claude-code"], default="mock",
+                        help="mock = sin API · real = anthropic SDK · "
+                             "claude-code = 7 subagentes via Claude Code CLI (sin API key)")
+    parser.add_argument("--cc-model", default="sonnet",
+                        help="Modelo para --mode claude-code (sonnet|opus|alias). "
+                             "Default: sonnet")
     parser.add_argument("--rounds", type=int, default=3,
-                        help="Rondas objetivo de debate (1..30)")
+                        help="Rondas objetivo de debate. mock/real: 1..30. "
+                             "claude-code: auto-capado a 1-2 (round 1 propose, "
+                             "round 2 cross-examination)")
     parser.add_argument("--speed", type=float, default=1.0,
                         help="Velocidad de la animación")
     parser.add_argument("--seed", type=int, default=None,
@@ -129,19 +139,29 @@ def main() -> None:
         if not os.environ.get("ANTHROPIC_API_KEY"):
             parser.error("--mode real requiere ANTHROPIC_API_KEY en env")
 
+    if args.mode == "claude-code":
+        from .claude_code_driver import claude_available
+        if not claude_available():
+            parser.error(
+                "--mode claude-code requiere el CLI `claude` en PATH. "
+                "Instala Claude Code: https://docs.claude.com/claude-code"
+            )
+
     if args.no_ui:
         asyncio.run(_run_headless(
             args.atasco, args.repo, args.mode, args.speed,
             args.rounds, args.seed,
             execute_mode=args.execute,
             max_execute_tasks=args.max_execute_tasks,
+            cc_model=args.cc_model,
         ))
     else:
         from .animator import animate
         driver = _build_driver(args.atasco, args.repo, args.mode, args.speed,
                                args.rounds, args.seed,
                                execute_mode=args.execute,
-                               max_execute_tasks=args.max_execute_tasks)
+                               max_execute_tasks=args.max_execute_tasks,
+                               cc_model=args.cc_model)
         asyncio.run(animate(
             speed=args.speed,
             scale=args.scale,

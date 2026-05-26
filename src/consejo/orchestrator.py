@@ -266,7 +266,7 @@ async def _real_propose(sage: Sage, briefing: str, atasco: str,
         f"Output JSON only."
     )
     resp = await client.messages.create(
-        model="claude-haiku-4-5",
+        model="claude-sonnet-4-6",
         max_tokens=2000,
         system=system,
         messages=[{"role": "user", "content": user_msg}],
@@ -319,7 +319,8 @@ async def run_council(atasco: str, repo: Path, bus: EventBus,
                       target_rounds: int = 3,
                       speed: float = 1.0,
                       seed: int | None = None,
-                      atasco_lang: str = "es") -> dict:
+                      atasco_lang: str = "es",
+                      cc_model: str = "sonnet") -> dict:
     """Ejecuta el consejo completo y empuja eventos al bus para el animator.
 
     `atasco_lang`: idioma del atasco del usuario ('es' o 'en'). Si es 'es' y
@@ -339,8 +340,75 @@ async def run_council(atasco: str, repo: Path, bus: EventBus,
 
     # === ANALIZANDO ===
     await emit(State.ANALIZANDO)
-    # Traduce el atasco a EN para los sabios (no-op en mock)
     atasco_es_original = atasco
+
+    # claude-code mode: sages run as parallel `claude -p` subprocesses; they
+    # do their own repo reading and there is no multi-round sign/amend loop.
+    # The ANALIZANDO phase covers the time the subagents work in parallel.
+    if mode == "claude-code":
+        from .claude_code_driver import (
+            gather_all_proposals, gather_all_critiques, judge_synthesis,
+        )
+        await asyncio.sleep(2.0 / speed)
+        cc_rounds = max(1, min(target_rounds, 2))
+
+        # Round 1: parallel proposals
+        signed_r1: list[int] = []
+
+        async def _on_propose_done(sage, props) -> None:
+            if sage not in SAGES or not props:
+                return
+            idx = SAGES.index(sage)
+            signed_r1.append(idx)
+            await emit(State.DEBATE, round_num=1, payload={
+                "signed_this_round": [idx],
+                "total_signed": signed_r1.copy(),
+            })
+
+        proposals_by_sage = await gather_all_proposals(
+            atasco, repo, model=cc_model, on_complete=_on_propose_done,
+        )
+        await asyncio.sleep(1.5 / speed)
+
+        # Round 2: parallel cross-examination
+        critiques_by_sage: dict[str, dict] | None = None
+        if cc_rounds >= 2 and proposals_by_sage:
+            signed_r2: list[int] = []
+
+            async def _on_critique_done(sage, critique) -> None:
+                if sage not in SAGES or not critique:
+                    return
+                idx = SAGES.index(sage)
+                signed_r2.append(idx)
+                await emit(State.DEBATE, round_num=2, payload={
+                    "signed_this_round": [idx],
+                    "total_signed": signed_r2.copy(),
+                })
+
+            critiques_by_sage = await gather_all_critiques(
+                atasco, repo, proposals_by_sage,
+                model=cc_model, on_complete=_on_critique_done,
+            )
+            await asyncio.sleep(1.5 / speed)
+
+        await emit(State.JUEZ)
+        plan = await judge_synthesis(
+            atasco, proposals_by_sage,
+            critiques_by_sage=critiques_by_sage,
+            rounds_used=cc_rounds, model=cc_model,
+        )
+        plan["atasco_es"] = atasco_es_original
+        plan["atasco_en"] = atasco
+        await asyncio.sleep(3.0 / speed)
+        await emit(State.ACUERDO)
+        await asyncio.sleep(2.0 / speed)
+        await emit(State.LEVANTANDOSE)
+        await asyncio.sleep(1.5 / speed)
+        await emit(State.SALIENDO)
+        await asyncio.sleep(4.0 / speed)
+        await emit(State.REPORTE, payload={"plan": plan})
+        return plan
+
     if atasco_lang == "es":
         atasco_en = await translate_atasco_to_en(atasco, mode=mode)
     else:

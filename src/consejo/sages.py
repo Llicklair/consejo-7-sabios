@@ -148,8 +148,52 @@ SAGES: list[Sage] = [
 ]
 
 
+VOICE_ONLY_SAGES: list[Sage] = [
+    Sage(
+        id="disenador",
+        role="Diseñador",
+        archetype="Oráculo del Arte",
+        sprite_color=(0, 0, 0),
+        accent_color=(0, 0, 0),
+        glyph_color=(0, 0, 0),
+        name_en="Designer",
+        expertise_en=(
+            "You defend visual hierarchy, color harmony, typography, layout, "
+            "whitespace, and the emotional response a user has when they "
+            "encounter the artifact. You attack ugly UIs, dense unscannable "
+            "layouts, cargo-culted design systems, and 'looks fine to me' "
+            "developer aesthetics."
+        ),
+        voice_en="perceptive; references contrast, rhythm, grid systems, "
+                 "and how the eye actually moves across a screen",
+        foil_en="Optimizer",
+    ),
+    Sage(
+        id="estratega",
+        role="Estratega",
+        archetype="Vidente",
+        sprite_color=(0, 0, 0),
+        accent_color=(0, 0, 0),
+        glyph_color=(0, 0, 0),
+        name_en="Strategist",
+        expertise_en=(
+            "You defend the question 'does this matter?'. You attack "
+            "technically correct work on the wrong problem, features nobody "
+            "asked for, optimization of dead code paths, and tactical wins "
+            "that erode the strategic position."
+        ),
+        voice_en="patient; asks 'who is the user', 'what changes if we "
+                 "don't do this', 'is this on the critical path'",
+        foil_en="Modernizer",
+    ),
+]
+
+
+ALL_SAGES: list[Sage] = SAGES + VOICE_ONLY_SAGES
+
+
 def by_id(sage_id: str) -> Sage:
-    for s in SAGES:
+    for s in ALL_SAGES:
         if s.id == sage_id:
             return s
     raise KeyError(f"Sage id desconocido: {sage_id}")

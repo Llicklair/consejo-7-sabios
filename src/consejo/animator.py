@@ -59,15 +59,15 @@ FRAME_DT = 1.0 / FPS
 COMIC_YELLOW: RGB = (255, 220, 60)
 
 STATE_SUBTITLES: dict[State, str] = {
-    State.ENTRANDO:     "Los sabios cruzan el corredor...",
-    State.SENTANDOSE:   "Toman asiento alrededor de la mesa.",
-    State.ANALIZANDO:   "Analizan el proyecto. El libro se eleva...",
-    State.DEBATE:       "Ronda {round} · Debate en curso",
-    State.JUEZ:         "El juez sintetiza tras la última firma...",
-    State.ACUERDO:      "Acuerdo alcanzado. Todos firman.",
-    State.LEVANTANDOSE: "Se levantan.",
-    State.SALIENDO:     "Salen al corredor a trabajar.",
-    State.REPORTE:      "consejo-report.md generado",
+    State.ENTRANDO:     "Los siete sabios cruzan el corredor hacia tu cámara...",
+    State.SENTANDOSE:   "Toman asiento. El Mago levanta la mirada hacia ti.",
+    State.ANALIZANDO:   "🔮 «Bienvenido, fundador. Analizamos tu proyecto y pronto debatiremos.»",
+    State.DEBATE:       "Ronda {round} · El debate arde · ✦ cada sello = un sabio que firma",
+    State.JUEZ:         "El juez sopesa las voces y sintetiza el veredicto...",
+    State.ACUERDO:      "Acuerdo alcanzado. Las siete firmas brillan sobre la mesa.",
+    State.LEVANTANDOSE: "Los sabios se levantan, satisfechos.",
+    State.SALIENDO:     "Salen al corredor para llevar el plan a tu mundo.",
+    State.REPORTE:      "📜 Reporte generado. Revisa el plan en tu consejo-report.md",
 }
 
 
@@ -274,13 +274,33 @@ def _draw_palantir_hud(canvas: Image.Image, round_num: int,
                        t: float) -> tuple[int, int]:
     """Pega un palantir grande con el número de ronda en el centro de la mesa.
     Devuelve el centro del palantir."""
-    # Genera (cada vez, por simplicidad) el palantir con la ronda. Es barato.
     palantir = generate_palantir(round_n=round_num)
-    # Flotación sutil para vibra mística
     float_y = int(math.sin(t * 2.2) * 1)
     px = TABLE_X + TABLE_W // 2 - palantir.width // 2
     py = TABLE_Y + 14 + float_y
     canvas.paste(palantir, (px, py), palantir)
+
+    if round_num > 0:
+        n_digits = len(str(round_num))
+        inner_w = n_digits * 3 + (n_digits - 1)
+        pad = 2
+        label_w = inner_w + pad * 2
+        label_h = 5 + pad * 2
+        label = Image.new("RGBA", (label_w, label_h), (15, 10, 30, 0))
+        d = ImageDraw.Draw(label)
+        d.rectangle((0, 0, label_w - 1, label_h - 1),
+                    outline=(255, 220, 80, 255), fill=(20, 5, 35, 230))
+        from .sprites import _draw_number as _sprite_draw_number
+        _sprite_draw_number(d, pad, pad, round_num, (255, 250, 220, 255))
+        scale_factor = 3
+        label = label.resize(
+            (label.width * scale_factor, label.height * scale_factor),
+            Image.NEAREST,
+        )
+        bx = px + palantir.width // 2 - label.width // 2
+        by = py - label.height - 1 + float_y
+        canvas.paste(label, (bx, by), label)
+
     return (px + palantir.width // 2, py + palantir.height // 2 - 4)
 
 
@@ -489,6 +509,13 @@ async def animate(speed: float = 1.0, scale: int = 1,
                            new_signs_age=new_signs_age)
         if scale > 1:
             img = upscale(img, scale)
+        cw, ch = console.size
+        target_h_px = max(2, (ch - 2) * 2)
+        if img.width > cw or img.height > target_h_px:
+            factor = min(cw / img.width, target_h_px / img.height)
+            img = img.resize((max(1, int(img.width * factor)),
+                              max(1, int(img.height * factor))),
+                             Image.NEAREST)
         pixels = Pixels.from_image(img)
         sub_template = STATE_SUBTITLES[state]
         sub = sub_template.format(round=current["round_num"]) \
