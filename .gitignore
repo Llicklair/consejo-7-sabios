@@ -28,3 +28,7 @@ Thumbs.db
 consejo-session-*.json
 consejo-report-*.md
 .consejo-cache/
+
+# Assets generados proceduralmente (regenerables con `python -m consejo.sprites`
+# y `python -m consejo.sound`). Demos curados viven en docs/.
+assets/
