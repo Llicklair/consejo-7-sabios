@@ -285,17 +285,37 @@ def _draw_palantir_hud(canvas: Image.Image, round_num: int,
 
 
 def _draw_bubbles(canvas: Image.Image, round_state: State,
-                  round_num: int, seat_indices: list[int]) -> None:
-    """Burbujas estilo cómic amarillas con glifos rúnicos sobre cada sabio."""
+                  round_num: int, seat_indices: list[int],
+                  t_in_state: float = 0.0) -> None:
+    """Burbujas multi-línea (2-3 líneas) que cambian cada ~1.5s — simulan
+    la conversación en curso. Cada sabio tiene su propio cadencia."""
+    tic = int(t_in_state / 1.5)           # nuevo contenido cada 1.5s
+    line_h = GLYPH_SIZE + 2               # altura por línea con gap
+
     for seat_idx, sage_idx in enumerate(seat_indices):
         sage = SAGES[sage_idx]
         _, sage_xy, _view = SEATS[seat_idx]
-        seed = f"{sage.id}-r{round_num}"
-        glyphs = text_to_glyphs(seed, length=3 + (seat_idx % 3))
-        strip = render_glyphs_to_strip(glyphs, glyphs=_glyphs(sage.glyph_color))
-        bw, bh = strip.width + 8, GLYPH_SIZE + 6
+        # 2 o 3 líneas, fluctúa con sage + tic
+        num_lines = 2 + ((sage_idx + tic) % 2)
+
+        line_strips = []
+        for li in range(num_lines):
+            seed = f"{sage.id}-r{round_num}-t{tic}-l{li}"
+            length = 3 + ((li + sage_idx + tic) % 3)
+            glyphs = text_to_glyphs(seed, length=length)
+            strip = render_glyphs_to_strip(glyphs, glyphs=_glyphs(sage.glyph_color))
+            line_strips.append(strip)
+
+        max_w = max(s.width for s in line_strips)
+        bw = max_w + 8
+        bh = line_h * num_lines + 4
+
         bubble = generate_bubble(bw, bh, color=COMIC_YELLOW)
-        bubble.paste(strip, (4, 3), strip)
+        for i, strip in enumerate(line_strips):
+            x_off = (bw - strip.width) // 2
+            y_off = 3 + i * line_h
+            bubble.paste(strip, (x_off, y_off), strip)
+
         bx = sage_xy[0] + 24 - bubble.width // 2
         by = sage_xy[1] - bubble.height - 2
         bx = max(2, min(canvas.width - bubble.width - 2, bx))
@@ -397,7 +417,7 @@ def render_frame(state: State, t_in_state: float, total_dur: float,
             p_color = (255, 130, 130)
         _draw_orbit_particles(canvas, pal_center, 18, 9, t_total,
                               n_particles=10, color=p_color)
-        _draw_bubbles(canvas, state, round_num, seat_indices)
+        _draw_bubbles(canvas, state, round_num, seat_indices, t_in_state)
         _draw_signatures(canvas, seat_indices, signed, t_total, new_signs_age)
 
     elif state == State.JUEZ:
