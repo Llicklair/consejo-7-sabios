@@ -1,51 +1,43 @@
 ---
-description: Opens a new IDE terminal panel running the Council with TUI animation
+description: Launches the Council in VSCode's terminal panel (sends Ctrl+Shift+B via SendKeys)
 ---
 
-Summon the Council of Seven Sages to debate the currently open project.
-Topic hardcoded, no prompts.
+Summon the Council of Seven Sages to debate the currently open VSCode
+project. Topic hardcoded, no prompts.
 
-## Known technical limitation
+## How I launch it
 
-Claude Code's Bash sandbox on Windows CANNOT:
-- Spawn detached processes (new terminal windows)
-- Fire URL handlers (`vscode://`, `cursor://`)
-- Execute IDE commands programmatically
+Claude Code's Bash sandbox on Windows CAN send keystrokes to the active
+window via PowerShell SendKeys. The default build task in VSCode is
+**"Consejo: mejorar este proyecto (auto)"** (with `--consensus`, opus,
+20-round cap, TUI animation), bound to `Ctrl+Shift+B`. So sending `^+b`
+fires the debate inside VSCode's terminal panel.
 
-Verified with `Start-Process notepad` → fails with the classic
-"InvalidOperationException" of a non-interactive session.
+Run exactly this Bash:
 
-So this slash command does NOT execute anything for you — it only shows
-the button/shortcut so YOU fire the task with a keystroke or click.
+```bash
+powershell -Command "Add-Type -AssemblyName System.Windows.Forms; Start-Sleep -Milliseconds 300; [System.Windows.Forms.SendKeys]::SendWait('^+b')"
+```
 
-## What to show the user
+## Before launching
 
-Print exactly this block (do NOT run any Bash):
+Tell the user in one line: "I'm going to send Ctrl+Shift+B — make sure
+VSCode is focused (click on the window if unsure). I'll confirm once
+sent."
 
-> 🔮 **Launch the debate from your IDE:**
->
-> **Option A (1 keystroke):** press `Ctrl+Shift+B` — it's set as the
-> default build task: `Consejo: mejorar este proyecto (auto)`.
->
-> **Option B (click):** click this link:
-> [▶ Run the Council (consensus, opus, ~30-60 min)](command:workbench.action.tasks.runTask?%5B%22Consejo%3A%20mejorar%20este%20proyecto%20(auto)%22%5D)
->
-> **Option C (manual):** `Ctrl+Shift+P` → "Tasks: Run Task" → "Consejo:
-> mejorar este proyecto (auto)".
->
-> Either opens a new terminal panel in the IDE with the TUI animation
-> running the turn-by-turn consensus debate (Opus, 20-round cap, topic
-> "¿Cómo mejoramos este proyecto?"). It will take ~30-60 min. When done,
-> the report is at `consejo-report-*.md`.
+After the bash, confirm: "Sent. If VSCode was focused you should see the
+terminal panel with the TUI animation of the debate. If not, click on
+VSCode and ask me /summon-the-council again."
 
 ## After
 
-When the user says they're done (or after the wait), if they want, read
-the latest report and summarize plan + vision.
+The debate takes ~30-60 min with Opus + consensus. When done, the report
+is at `consejo-report-*.md` in cwd. If the user wants, you can read and
+summarize plan + vision.
 
-## DO NOT
+## Limitation
 
-- DO NOT try `code --open-url`, `start`, `Start-Process` or similar —
-  they all fail in this sandbox.
-- DO NOT run the python in background here (animation does not render in chat).
-- DO NOT modify project code during this invocation.
+SendKeys sends to the foreground window. If the user has another app in
+focus (not VSCode), the keystroke is consumed there and the task does
+not fire. There's no reliable way from the sandbox to target a specific
+window — depends on user focus.
