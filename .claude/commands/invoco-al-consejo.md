@@ -25,7 +25,7 @@ Desde `d:\consejo-7-sabios`, modo claude-code + consensus + headless
 sí muestran el progreso):
 
 ```bash
-cd d:/consejo-7-sabios && PYTHONPATH=src .venv/Scripts/python.exe -m consejo.cli "$ARGUMENTS" --mode claude-code --consensus --consensus-rounds 20 --cc-model sonnet --no-ui
+cd d:/consejo-7-sabios && PYTHONPATH=src .venv/Scripts/python.exe -m consejo.cli "$ARGUMENTS" --mode claude-code --consensus --consensus-rounds 20 --cc-model opus --no-ui
 ```
 
 **Lánzalo en background** (`run_in_background: true` en Bash) y monta un

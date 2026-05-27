@@ -25,7 +25,7 @@ pygame animation does not render inside this chat — per-turn log lines
 do show progress):
 
 ```bash
-cd d:/consejo-7-sabios && PYTHONPATH=src .venv/Scripts/python.exe -m consejo.cli "$ARGUMENTS" --mode claude-code --consensus --consensus-rounds 20 --cc-model sonnet --no-ui
+cd d:/consejo-7-sabios && PYTHONPATH=src .venv/Scripts/python.exe -m consejo.cli "$ARGUMENTS" --mode claude-code --consensus --consensus-rounds 20 --cc-model opus --no-ui
 ```
 
 **Launch in background** (`run_in_background: true` on Bash) and arm a

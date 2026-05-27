@@ -9,14 +9,23 @@
     mock | real | claude-code  (default: mock)
 
 .PARAMETER Rounds
-    Rondas objetivo (default: 3 para mock, 2 para claude-code)
+    Rondas objetivo en modo clásico (default: 3 para mock, 2 para claude-code).
+    Ignorado si -Consensus está activo.
 
 .PARAMETER Speed
     Velocidad de animación (default: 0.3 = pausada y contemplativa)
 
+.PARAMETER Consensus
+    Activa el modo conversacional turn-by-turn (solo --mode claude-code).
+    Los 9 sabios debaten round-robin hasta unanimidad o cap.
+
+.PARAMETER ConsensusRounds
+    Cap de rondas en modo consensus (default: 20).
+
 .EXAMPLE
     .\scripts\run-consejo.ps1 -Atasco "Mejora general"
     .\scripts\run-consejo.ps1 -Atasco "Fix auth" -Mode claude-code -Rounds 2
+    .\scripts\run-consejo.ps1 -Atasco "Visión 2026" -Mode claude-code -Consensus
 #>
 
 param(
@@ -25,7 +34,9 @@ param(
     [string]$Mode = "mock",
     [int]$Rounds = 0,
     [double]$Speed = 0.3,
-    [string]$CcModel = "sonnet"
+    [string]$CcModel = "opus",
+    [switch]$Consensus,
+    [int]$ConsensusRounds = 20
 )
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -49,6 +60,11 @@ if ($Rounds -eq 0) {
 
 $env:PYTHONPATH = "src"
 
+if ($Consensus -and $Mode -ne "claude-code") {
+    Write-Host "❌ -Consensus solo funciona con -Mode claude-code" -ForegroundColor Red
+    exit 1
+}
+
 $args = @(
     "-m", "consejo.cli",
     $Atasco,
@@ -61,9 +77,17 @@ if ($Mode -eq "claude-code") {
     $args += @("--cc-model", $CcModel)
 }
 
+if ($Consensus) {
+    $args += @("--consensus", "--consensus-rounds", $ConsensusRounds)
+}
+
 Write-Host "🔮 Convocando al Consejo..." -ForegroundColor Cyan
 Write-Host "   Atasco: $Atasco" -ForegroundColor Gray
-Write-Host "   Modo:   $Mode  ·  Rondas: $Rounds  ·  Velocidad: $Speed" -ForegroundColor Gray
+if ($Consensus) {
+    Write-Host "   Modo:   $Mode (CONSENSUS, hasta $ConsensusRounds rondas)  ·  Velocidad: $Speed" -ForegroundColor Gray
+} else {
+    Write-Host "   Modo:   $Mode  ·  Rondas: $Rounds  ·  Velocidad: $Speed" -ForegroundColor Gray
+}
 Write-Host ""
 
 & .venv\Scripts\python.exe @args
