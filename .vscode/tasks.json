@@ -1,0 +1,95 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Consejo: invocar (mock, animado)",
+      "type": "shell",
+      "command": "${workspaceFolder}/.venv/Scripts/python.exe",
+      "args": [
+        "-m", "consejo.cli",
+        "${input:atasco}",
+        "--mode", "mock",
+        "--rounds", "3",
+        "--speed", "0.3"
+      ],
+      "options": {
+        "env": { "PYTHONPATH": "src" }
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "new",
+        "clear": true,
+        "focus": true
+      },
+      "problemMatcher": [],
+      "group": { "kind": "build", "isDefault": true }
+    },
+    {
+      "label": "Consejo: invocar (claude-code, animado, 2 rondas)",
+      "type": "shell",
+      "command": "${workspaceFolder}/.venv/Scripts/python.exe",
+      "args": [
+        "-m", "consejo.cli",
+        "${input:atasco}",
+        "--mode", "claude-code",
+        "--cc-model", "sonnet",
+        "--rounds", "2",
+        "--speed", "0.3"
+      ],
+      "options": {
+        "env": { "PYTHONPATH": "src" }
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "new",
+        "clear": true,
+        "focus": true
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Consejo: invocar (mock, headless)",
+      "type": "shell",
+      "command": "${workspaceFolder}/.venv/Scripts/python.exe",
+      "args": [
+        "-m", "consejo.cli",
+        "${input:atasco}",
+        "--mode", "mock",
+        "--no-ui",
+        "--rounds", "3"
+      ],
+      "options": {
+        "env": { "PYTHONPATH": "src" }
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": false
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Consejo: tests",
+      "type": "shell",
+      "command": "${workspaceFolder}/.venv/Scripts/python.exe",
+      "args": ["-m", "pytest", "tests/", "-v"],
+      "options": {
+        "env": { "PYTHONPATH": "src" }
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      },
+      "problemMatcher": [],
+      "group": "test"
+    }
+  ],
+  "inputs": [
+    {
+      "id": "atasco",
+      "type": "promptString",
+      "description": "El atasco que el Consejo debe debatir",
+      "default": "Mejora general del proyecto"
+    }
+  ]
+}

@@ -52,6 +52,33 @@ Cada sesión, los 7 se sientan **aleatoriamente** alrededor de la mesa.
 
 ## Quick start
 
+### Launch desde VSCode / Cursor
+
+Hay `tasks.json` con 4 tareas listas. `Ctrl+Shift+B` lanza la default (mock
+animado); `Ctrl+Shift+P > Run Task` deja elegir entre:
+
+- **Consejo: invocar (mock, animado)** — sin API, animación TUI
+- **Consejo: invocar (claude-code, animado, 2 rondas)** — debate real via Claude Code CLI
+- **Consejo: invocar (mock, headless)** — solo logs
+- **Consejo: tests** — pytest
+
+La tarea abre un nuevo terminal integrado y pide el atasco interactivamente.
+
+### Launch desde scripts
+
+Hay wrappers en `scripts/`:
+
+```powershell
+.\scripts\run-consejo.ps1                              # prompt interactivo
+.\scripts\run-consejo.ps1 -Atasco "fix auth" -Mode claude-code
+```
+```bash
+./scripts/run-consejo.sh "fix auth"
+MODE=claude-code ./scripts/run-consejo.sh "fix auth"
+```
+
+### Quick start manual
+
 **PowerShell (Windows):**
 
 ```powershell

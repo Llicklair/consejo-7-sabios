@@ -53,7 +53,7 @@ from .states import (
     mock_driver,
 )
 
-FPS = 10
+FPS = 15  # 50% más fluido que 10; aún seguro para terminals con SSH/latencia
 FRAME_DT = 1.0 / FPS
 
 COMIC_YELLOW: RGB = (255, 220, 60)
@@ -210,8 +210,11 @@ def _walk_view(dx: int, dy: int) -> str:
 
 
 def _walk_bob(t: float) -> int:
-    """Vertical pixels-up offset for the walking gait at ~2 steps/sec."""
-    return int(abs(math.sin(t * 6.0)) * 2)
+    """Vertical pixels-up offset for the walking gait at ~2 steps/sec.
+
+    Amplitude 3px = visible gait (sprite ~40px tall, ~7% of body). Goes up to
+    3, stays at 2 most of the cycle, dips to 0 at zero-crossings (foot down)."""
+    return int(abs(math.sin(t * 6.0)) * 3)
 
 
 _CONSOLE_SIZE_CACHE: dict = {"t": 0.0, "size": (0, 0)}
