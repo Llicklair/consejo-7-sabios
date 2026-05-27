@@ -544,6 +544,14 @@ async def run_council(atasco: str, repo: Path, bus: EventBus,
             )
             await asyncio.sleep(1.5 / speed)
 
+        if not proposals_by_sage:
+            raise RuntimeError(
+                "Todos los sabios fallaron en la ronda 1 (proposals_by_sage vacío). "
+                "Causa probable: agotamiento de procesos (claude.exe huérfanos de "
+                "sesiones previas). Cierra los procesos zombi y reintenta. "
+                "PowerShell: Get-Process claude,node | Stop-Process -Force"
+            )
+
         await emit(State.JUEZ)
         plan = await judge_synthesis(
             atasco, proposals_by_sage,

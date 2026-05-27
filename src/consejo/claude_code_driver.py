@@ -18,11 +18,87 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import shutil
+import subprocess
+import sys
 from dataclasses import asdict
 from pathlib import Path
 
 from .sages import ALL_SAGES, SAGES, Sage
+
+
+def _extract_json_object(text: str) -> dict:
+    """Parse text as JSON; on failure, extract the first balanced {...} block.
+
+    The model often wraps output in ```json ... ``` fences or adds a short
+    preamble. We strip fences and scan for the first balanced object so a
+    minor formatting deviation doesn't waste a $0.08 round trip.
+    """
+    s = text.strip()
+    if s.startswith("```"):
+        s = re.sub(r"^```(?:json)?\s*\n?", "", s)
+        s = re.sub(r"\n?```\s*$", "", s)
+    try:
+        return json.loads(s)
+    except json.JSONDecodeError:
+        pass
+    start = s.find("{")
+    if start < 0:
+        raise json.JSONDecodeError("no '{' in response", s, 0)
+    depth, in_str, esc = 0, False, False
+    for i in range(start, len(s)):
+        c = s[i]
+        if in_str:
+            if esc:
+                esc = False
+            elif c == "\\":
+                esc = True
+            elif c == '"':
+                in_str = False
+        else:
+            if c == '"':
+                in_str = True
+            elif c == "{":
+                depth += 1
+            elif c == "}":
+                depth -= 1
+                if depth == 0:
+                    return json.loads(s[start:i + 1])
+    raise json.JSONDecodeError("unbalanced braces", s, start)
+
+
+def find_orphan_claude_processes(min_age_seconds: int = 600) -> list[tuple[int, str]]:
+    """Return [(pid, label)] for `claude`/`node` processes older than min_age_seconds.
+
+    Stdlib-only: tasklist on Windows, ps on POSIX. Returns [] if the probe fails —
+    a pre-flight check should never block the run on its own malfunction.
+    """
+    out: list[tuple[int, str]] = []
+    try:
+        if sys.platform == "win32":
+            r = subprocess.run(
+                ["tasklist", "/FO", "CSV", "/NH",
+                 "/FI", "IMAGENAME eq claude.exe"],
+                capture_output=True, text=True, timeout=5,
+            )
+            for line in r.stdout.splitlines():
+                m = re.match(r'"([^"]+)","(\d+)"', line)
+                if m:
+                    out.append((int(m.group(2)), m.group(1)))
+        else:
+            r = subprocess.run(
+                ["ps", "-eo", "pid,etimes,comm"],
+                capture_output=True, text=True, timeout=5,
+            )
+            for line in r.stdout.splitlines()[1:]:
+                parts = line.split(None, 2)
+                if len(parts) == 3 and parts[2].strip() in ("claude", "node"):
+                    if int(parts[1]) >= min_age_seconds:
+                        out.append((int(parts[0]), parts[2].strip()))
+    except (FileNotFoundError, subprocess.SubprocessError, ValueError):
+        pass
+    return out
 
 
 PROPOSAL_SCHEMA = {
@@ -299,7 +375,19 @@ def _build_sage_user_message(atasco: str, repo: Path, round_num: int) -> str:
         f"Analyze the repository above by reading files with the tools available "
         f"to you (Read, Glob, Grep). Bias your reading toward YOUR axis. Return "
         f"a JSON object with 1-3 proposals, each citing a real file/symbol from "
-        f"this specific repo."
+        f"this specific repo.\n\n"
+        f"## Required output shape\n"
+        f"```json\n{json.dumps(PROPOSAL_SCHEMA, indent=2)}\n```\n\n"
+        f"## Output discipline (hard constraints)\n"
+        f"- **Tool-call budget: at most 4 tool calls.** After 4 reads/greps you "
+        f"have enough — stop exploring and emit the JSON.\n"
+        f"- **Your final message MUST be the JSON object** matching the schema. "
+        f"No prose, no preamble, no explanation outside the JSON. Do NOT wrap "
+        f"in markdown code fences.\n"
+        f"- **An empty response is a failure.** If you genuinely have nothing to "
+        f"propose, return `{{\"proposals\": []}}` — never end the turn silently.\n"
+        f"- **Do not narrate your exploration.** Tool calls happen; the JSON is "
+        f"the only thing the council ever sees."
     )
 
 
@@ -333,6 +421,16 @@ def _build_judge_user_message(
         "When critiques reveal a proposal is rejected by another sage with a "
         "substantive objection, record this as an unresolved_disagreement "
         "instead of forcing a synthesis. The dissent should name both positions.",
+        "",
+        "## Required output shape",
+        f"```json\n{json.dumps(JUDGE_SCHEMA, indent=2)}\n```",
+        "",
+        "## Output discipline (CRITICAL — read carefully)",
+        "- Your ENTIRE response must be the JSON object. Nothing before, nothing after.",
+        "- Do NOT claim to 'write' or 'save' anything to disk. You have NO file-writing tools.",
+        "- Do NOT produce a prose summary of your decisions — the JSON is the deliverable.",
+        "- Do NOT wrap in markdown code fences (no ```json).",
+        "- An empty response is a failure; always produce the structured output inline.",
     ]
     return "\n".join(parts)
 
@@ -377,7 +475,17 @@ def _build_critique_user_message(
         f"{json.dumps(others, indent=2)}\n"
         f"</other_sages_proposals>\n\n"
         f"Cross-examine the proposals above. You may also read repo files with "
-        f"the tools available to verify claims. Output JSON only."
+        f"the tools available to verify claims. Output JSON only.\n\n"
+        f"## Required output shape\n"
+        f"```json\n{json.dumps(CRITIQUE_SCHEMA, indent=2)}\n```\n\n"
+        f"## Output discipline (hard constraints)\n"
+        f"- **Tool-call budget: at most 3 tool calls.** You already have the "
+        f"other sages' proposals — only verify, don't re-explore.\n"
+        f"- **Your final message MUST be the JSON object** matching the schema. "
+        f"No prose, no preamble. Do NOT wrap in markdown code fences.\n"
+        f"- **An empty response is a failure.** If you have no objections and "
+        f"no amendments, return `{{\"endorses\": [], \"challenges\": [], "
+        f"\"amendments\": []}}` — never end the turn silently."
     )
 
 
@@ -389,6 +497,7 @@ async def _spawn_claude(
     model: str,
     allowed_tools: str = "Read,Glob,Grep",
     timeout_s: float = 300.0,
+    retry_attempt: int = 0,
 ) -> dict:
     """Spawn a `claude -p` subprocess and return the parsed inner JSON.
 
@@ -407,10 +516,12 @@ async def _spawn_claude(
         "--system-prompt", system_prompt,
         "--add-dir", str(repo),
         "--model", model,
-        "--json-schema", json.dumps(schema),
         "--no-session-persistence",
-        "--allowedTools", allowed_tools,
     ]
+    if allowed_tools:
+        args += ["--allowedTools", allowed_tools]
+    else:
+        args += ["--tools", ""]
     proc = await asyncio.create_subprocess_exec(
         *args,
         stdin=asyncio.subprocess.PIPE,
@@ -427,8 +538,17 @@ async def _spawn_claude(
         raise RuntimeError(f"claude CLI timed out after {timeout_s}s")
 
     if proc.returncode != 0:
-        err = stderr.decode("utf-8", errors="replace")[:1000]
-        raise RuntimeError(f"claude CLI failed (exit {proc.returncode}): {err}")
+        err = stderr.decode("utf-8", errors="replace")[:2000]
+        rc = proc.returncode
+        rc_signed = rc - 2**32 if rc > 2**31 else rc
+        diag = (
+            f"returncode={rc} (signed={rc_signed}) "
+            f"stderr_len={len(stderr)} stdout_len={len(stdout)}"
+        )
+        head = stdout[:500].decode("utf-8", errors="replace")
+        raise RuntimeError(
+            f"claude CLI failed: {diag}\n--stderr--\n{err}\n--stdout_head--\n{head}"
+        )
 
     out = stdout.decode("utf-8", errors="replace")
     try:
@@ -438,26 +558,63 @@ async def _spawn_claude(
 
     inner_text = wrapper.get("result", "")
     if not inner_text:
+        if retry_attempt == 0:
+            turns = wrapper.get("num_turns")
+            dur = wrapper.get("duration_ms")
+            cost = wrapper.get("total_cost_usd", 0.0)
+            print(
+                f"[empty-result-retry] turns={turns} duration={dur}ms "
+                f"cost=${cost:.3f}; retrying with tools disabled",
+                file=sys.stderr,
+            )
+            return await _spawn_claude(
+                user_msg=(
+                    f"{user_msg}\n\n"
+                    f"## URGENT: previous attempt failed\n"
+                    f"Your previous response was an empty string after "
+                    f"{turns} turns of exploration. You may NOT use tools this "
+                    f"time — emit the JSON directly based on what you can infer "
+                    f"from the schema and the atasco. If you genuinely cannot "
+                    f"produce concrete proposals, return the minimal valid "
+                    f"object that matches the schema (e.g. with an empty list)."
+                ),
+                system_prompt=system_prompt,
+                schema=schema,
+                repo=repo,
+                model=model,
+                allowed_tools="",
+                timeout_s=timeout_s,
+                retry_attempt=1,
+            )
         raise RuntimeError(f"claude CLI returned empty result: {wrapper}")
 
     try:
-        return json.loads(inner_text)
+        return _extract_json_object(inner_text)
     except json.JSONDecodeError as e:
         raise RuntimeError(
             f"sage returned non-JSON inner text: {inner_text[:500]}"
         ) from e
 
 
+_SPAWN_SEM = asyncio.Semaphore(3)
+"""Cap simultaneous `claude -p` subprocesses. With 9 sages the unbounded fan-out
+spawned 18+ processes (claude+node per sage) and the OS would kill survivors
+under memory pressure — manifested as the judge dying with exit -1 / no stderr.
+3 is empirical: low enough to fit in ~2GB headroom, high enough to keep total
+wall time under ~3x the unbounded case."""
+
+
 async def propose_one_sage(
     sage: Sage, atasco: str, repo: Path, round_num: int, model: str
 ) -> tuple[Sage, list[dict]]:
-    inner = await _spawn_claude(
-        user_msg=_build_sage_user_message(atasco, repo, round_num),
-        system_prompt=_sage_system_prompt(sage),
-        schema=PROPOSAL_SCHEMA,
-        repo=repo,
-        model=model,
-    )
+    async with _SPAWN_SEM:
+        inner = await _spawn_claude(
+            user_msg=_build_sage_user_message(atasco, repo, round_num),
+            system_prompt=_sage_system_prompt(sage),
+            schema=PROPOSAL_SCHEMA,
+            repo=repo,
+            model=model,
+        )
     return sage, inner.get("proposals", [])
 
 
@@ -488,7 +645,11 @@ async def gather_all_proposals(
                 by_sage[sage.id] = props
                 if on_complete:
                     await on_complete(sage, props)
-            except Exception:
+            except Exception as e:
+                print(
+                    f"[sage-fail] {sage_obj.id} propose: {str(e)[:600]}",
+                    file=sys.stderr,
+                )
                 if on_complete:
                     await on_complete(sage_obj, None)
     return by_sage
@@ -499,13 +660,14 @@ async def critique_one_sage(
     round1_by_sage: dict[str, list[dict]],
     model: str,
 ) -> tuple[Sage, dict]:
-    inner = await _spawn_claude(
-        user_msg=_build_critique_user_message(atasco, repo, round1_by_sage, sage.id),
-        system_prompt=_sage_critique_system_prompt(sage),
-        schema=CRITIQUE_SCHEMA,
-        repo=repo,
-        model=model,
-    )
+    async with _SPAWN_SEM:
+        inner = await _spawn_claude(
+            user_msg=_build_critique_user_message(atasco, repo, round1_by_sage, sage.id),
+            system_prompt=_sage_critique_system_prompt(sage),
+            schema=CRITIQUE_SCHEMA,
+            repo=repo,
+            model=model,
+        )
     return sage, inner
 
 
@@ -535,7 +697,11 @@ async def gather_all_critiques(
                 by_sage[sage.id] = critique
                 if on_complete:
                     await on_complete(sage, critique)
-            except Exception:
+            except Exception as e:
+                print(
+                    f"[sage-fail] {sage_obj.id} critique: {str(e)[:600]}",
+                    file=sys.stderr,
+                )
                 if on_complete:
                     await on_complete(sage_obj, None)
     return by_sage
@@ -557,6 +723,7 @@ async def judge_synthesis(
         schema=JUDGE_SCHEMA,
         repo=Path.cwd(),
         model="opus",
+        allowed_tools="",
     )
     inner["atasco"] = atasco
     inner["rounds_used"] = rounds_used

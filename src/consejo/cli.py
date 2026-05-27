@@ -202,9 +202,21 @@ def main() -> None:
             parser.error(_error_missing_api_key())
 
     if args.mode == "claude-code":
-        from .claude_code_driver import claude_available
+        from .claude_code_driver import claude_available, find_orphan_claude_processes
         if not claude_available():
             parser.error(_error_missing_claude_cli())
+        orphans = find_orphan_claude_processes()
+        if orphans:
+            pids = ",".join(str(p) for p, _ in orphans)
+            print(
+                f"\n[WARN] {len(orphans)} proceso(s) claude/node detectado(s) "
+                f"(PIDs: {pids}). Si vienen de una sesion previa del consejo, "
+                f"pueden agotar memoria y matar al juez (exit -1 sin stderr).\n"
+                f"  PowerShell: Stop-Process -Id {pids} -Force\n"
+                f"  Ojo: confirma que ninguno sea tu Claude Code activo "
+                f"(mira StartTime en Get-Process).\n",
+                file=sys.stderr,
+            )
 
     out_holder: dict = {}
 
