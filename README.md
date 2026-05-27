@@ -52,43 +52,106 @@ Cada sesión, los 7 se sientan **aleatoriamente** alrededor de la mesa.
 
 ## Quick start
 
+**PowerShell (Windows):**
+
 ```powershell
 git clone https://github.com/Llicklair/consejo-7-sabios
 cd consejo-7-sabios
 python -m venv .venv
 .venv\Scripts\pip install -e .
-
-# Genera assets procedurales (sprites + sonidos)
 python -m consejo.sprites
 python -m consejo.sound
 
-# Lanza el consejo en modo demo (sin API)
 consejo "El módulo auth tiene 800 líneas y los tests son frágiles" `
   --mode mock --rounds 3 --speed 0.7
+```
 
-# Modo headless (solo logs, sin animación)
-consejo "..." --no-ui --mode mock
+**bash / zsh (macOS, Linux):**
 
-# Auto-execute (crea rama + commits SAFE en un repo git)
-consejo "..." --mode mock --execute auto
+```bash
+git clone https://github.com/Llicklair/consejo-7-sabios
+cd consejo-7-sabios
+python -m venv .venv
+.venv/bin/pip install -e .
+python -m consejo.sprites
+python -m consejo.sound
+
+consejo "El módulo auth tiene 800 líneas y los tests son frágiles" \
+  --mode mock --rounds 3 --speed 0.7
+```
+
+**Tres modos disponibles:**
+
+| `--mode` | Requiere | Calidad del debate |
+|----------|----------|--------------------|
+| `mock` | nada | canned + archivos reales del repo |
+| `real` | `pip install anthropic` + `ANTHROPIC_API_KEY` | Sonnet 4.6 sabios + Opus 4.7 juez |
+| `claude-code` | CLI `claude` en PATH (sin API key) | 7 visibles + 2 voice-only · 2 rondas threaded |
+
+```bash
+consejo "..." --no-ui --mode mock                          # headless
+consejo "..." --mode mock --execute auto                   # auto-commits SAFE
+consejo --problem "Auth module is 800 lines" --mode mock   # English alias
 ```
 
 Requiere terminal con truecolor + Unicode: Windows Terminal, WezTerm,
-iTerm2. `cmd.exe` clásico no.
+iTerm2. `cmd.exe` clásico no. El canvas es 352×112 chars; si tu terminal
+es más pequeño, la escena se reduce automáticamente para encajar.
+
+### ¿Por qué identificadores en español?
+
+El user-facing surface (CLI, reportes) está en español; los prompts del
+modelo van en inglés porque Claude rinde mejor ahí. Los `sage_id`
+(`arquitecto`, `embajador`, etc.) son ES; los `name_en` (`Architect`,
+`Ambassador`) son EN. El flag `--problem` es el alias EN del posicional
+`atasco` para que un colaborador no-hispanohablante pueda usar el CLI
+sin adivinar.
 
 ---
 
-## Modo real (con Claude API)
+## Modo `--mode real` (Anthropic SDK)
 
 ```powershell
-$env:ANTHROPIC_API_KEY="sk-ant-..."
+$env:ANTHROPIC_API_KEY = "sk-ant-..."     # PowerShell
+```
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...        # bash / zsh
+```
+```cmd
+setx ANTHROPIC_API_KEY "sk-ant-..."        # cmd.exe (permanente, reabrir shell)
+```
+
+```bash
 consejo "tu atasco en español" --mode real --rounds 3
 ```
 
-- Sabios usan **Claude Haiku 4.5** (paralelo, barato)
+- Sabios usan **Claude Sonnet 4.6** (paralelo, calidad solida en debate)
 - Juez usa **Claude Opus 4.7** (síntesis y clasificación de riesgo)
+- Timeout + retry exponencial + validación de schema; outputs malformados se
+  descartan limpiamente (no crashean el debate)
 - Traducción ES→EN del atasco al inicio y EN→ES del plan al final
 - El reporte incluye transcripción original (EN) para auditar lo dicho
+
+Get a key: <https://console.anthropic.com/settings/keys>. Nota: una
+suscripción Pro/Max **no** incluye créditos de API — se factura aparte.
+
+## Modo `--mode claude-code` (sin API key)
+
+Si tienes el CLI [`claude`](https://docs.claude.com/claude-code) instalado y
+una sesión Pro/Max activa, este modo orquesta 7+2 subagentes vía `claude -p`
+— sin API key, usando los tokens de tu suscripción.
+
+```bash
+consejo "tu atasco" --mode claude-code --cc-model sonnet --rounds 2
+```
+
+- **9 voces**: los 7 sabios visibles + Diseñador y Estratega (voice-only,
+  no aparecen en la escena pero sí en el reporte)
+- **2 rondas**: round 1 propose en paralelo, round 2 cross-examination
+  threaded (cada sabio endorses/challenges/amendments las propuestas del resto)
+- Cada sabio ejecuta como subprocess `claude -p` con `Read,Glob,Grep`
+  permitidos (read-only) y `--json-schema` constrained output
+- Disensos aparecen como `unresolved_disagreements` en el reporte
 
 ---
 
@@ -121,22 +184,29 @@ Ver [ARCHITECTURE.md](ARCHITECTURE.md) para el documento completo.
 
 ```
 src/consejo/
-├── sages.py         — Los 7 sabios (ES + EN)
-├── sprites.py       — Sprites/tiles procedurales (PIL)
-├── scene.py         — Composición de escena dungeon
-├── animator.py      — Bucle de animación + bus de eventos
-├── states.py        — Máquina de estados (ENTRANDO..REPORTE)
-├── orchestrator.py  — Consejo real (mock + scaffolding anthropic)
-├── translator.py    — Pipeline ES↔EN
-├── executor.py      — Modo auto: git branches + commits SAFE
-├── sound.py         — Sonido procedural polifónico
-├── glyphs.py        — Idioma rúnico inventado
-├── renderer.py      — rich-pixels → terminal
-└── cli.py           — `consejo` entry point
+├── sages.py             — 7 visibles + 2 voice-only (ALL_SAGES)
+├── sprites.py           — Sprites/tiles procedurales (PIL)
+├── scene.py             — Composición de escena dungeon
+├── frames.py            — API pública de render_frame (split for testability)
+├── animator.py          — Bucle Rich Live + sound triggers
+├── states.py            — Enum State + StateEvent + timings
+├── bus.py               — EventBus + Publisher protocol
+├── drivers/mock.py      — Mock driver (canned sequence)
+├── orchestrator.py      — Consejo real (mock + real hardened + briefing per-sage)
+├── claude_code_driver.py — Modo claude-code (7+2 subagents via CLI)
+├── translator.py        — Pipeline ES↔EN (Haiku)
+├── executor.py          — Modo auto: git async + sanitización de payloads
+├── sound.py             — Sonido procedural polifónico
+├── glyphs.py            — Idioma rúnico inventado
+├── renderer.py          — Asset loaders + decompression-bomb guard
+└── cli.py               — `consejo` entry point (Typer-ready argparse)
 
 prompts/
-├── sage_template.md — System prompt unificado (interpolado por sabio)
-└── judge.md         — Síntesis del juez
+├── sage_template.md     — System prompt unificado (interpolado por sabio)
+└── judge.md             — Síntesis del juez
+
+tests/
+└── test_council_snapshot.py — invariantes del pipeline mock (10 tests)
 ```
 
 ---
@@ -156,7 +226,8 @@ prompts/
 ## Estado
 
 - **Fase 2 (visual + audio)**: ✅ completo
-- **Fase 1 (consejo real)**: ✅ mock end-to-end · ⏳ real-mode (anthropic SDK) con scaffolding listo, falta debugging con API key real
+- **Fase 1 (consejo real)**: ✅ mock end-to-end con archivos reales del repo · ✅ `--mode real` hardened (timeout + retry + schema validation) · ✅ `--mode claude-code` con 2 rondas threaded
+- **Roster**: 7 visibles + 2 voice-only (Diseñador, Estratega)
 - **Real executor agent** (Claude implementa SAFE tasks de verdad, no
   commits vacíos): ⏳ pendiente
 - **Versión inglesa del repo**: ⏳ planeada

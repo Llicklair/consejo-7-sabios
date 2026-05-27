@@ -4,10 +4,10 @@ version = "0.1.0"
 description = "El Consejo de los 7 Sabios — debate técnico estructurado entre 7 agentes con visiones opuestas."
 requires-python = ">=3.11"
 dependencies = [
-    "rich>=13.7",
-    "rich-pixels>=3.0",
-    "pillow>=10.0",
-    "pygame>=2.5",
+    "rich>=13.7,<15",
+    "rich-pixels>=3.0,<4",
+    "pillow>=10.0,<12",
+    "pygame>=2.5,<2.6",
 ]
 
 [project.optional-dependencies]
@@ -28,3 +28,8 @@ packages = ["src/consejo"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+
+# Phase D #17 deferred: Typer migration + bump requires-python to >=3.12
+# (would unlock PEP 695 `type` aliases, @typing.override). Deferred because
+# the current dev environment is 3.11.9 and the argparse CLI was heavily
+# polished in this phase (slugify, bilingual errors, --problem alias).

@@ -90,13 +90,25 @@ def _room() -> Image.Image:
     return _ROOM_CACHE.copy()
 
 
+_SEATED_CACHE: dict[tuple, Image.Image] = {}
+
+
 def _scene_seated(seat_indices: list[int]) -> Image.Image:
-    canvas = _room()
-    for seat_idx, sage_idx in enumerate(seat_indices):
-        sage = SAGES[sage_idx]
-        _, sage_xy, view = SEATS[seat_idx]
-        canvas.paste(_sprite(sage.id, view), sage_xy, _sprite(sage.id, view))
-    return canvas
+    """Compose room + 7 seated sage sprites. Cached per seat permutation —
+    seat_indices is constant for a session (set once via random_seat_indices),
+    so this builds the static base scene exactly once per (session, decor)."""
+    key = tuple(seat_indices)
+    cached = _SEATED_CACHE.get(key)
+    if cached is None:
+        canvas = _room()
+        for seat_idx, sage_idx in enumerate(seat_indices):
+            sage = SAGES[sage_idx]
+            _, sage_xy, view = SEATS[seat_idx]
+            sp = _sprite(sage.id, view)
+            canvas.paste(sp, sage_xy, sp)
+        _SEATED_CACHE[key] = canvas
+        cached = canvas
+    return cached.copy()
 
 
 def _add_static_table_decor(canvas: Image.Image) -> None:
@@ -200,6 +212,20 @@ def _walk_view(dx: int, dy: int) -> str:
 def _walk_bob(t: float) -> int:
     """Vertical pixels-up offset for the walking gait at ~2 steps/sec."""
     return int(abs(math.sin(t * 6.0)) * 2)
+
+
+_CONSOLE_SIZE_CACHE: dict = {"t": 0.0, "size": (0, 0)}
+
+
+def _cached_console_size(console, ttl: float = 0.5) -> tuple[int, int]:
+    """Memoize console.size for `ttl` seconds. Rich's console.size probes the
+    terminal on each access, which is wasteful at FPS=10 — and the user does
+    not resize their terminal 10×/sec."""
+    now = time.monotonic()
+    if now - _CONSOLE_SIZE_CACHE["t"] > ttl:
+        _CONSOLE_SIZE_CACHE["t"] = now
+        _CONSOLE_SIZE_CACHE["size"] = (console.size.width, console.size.height)
+    return _CONSOLE_SIZE_CACHE["size"]
 
 
 def _apply_fire_frame(canvas: Image.Image, t_total: float) -> None:
@@ -531,7 +557,7 @@ async def animate(speed: float = 1.0, scale: int = 1,
                            new_signs_age=new_signs_age)
         if scale > 1:
             img = upscale(img, scale)
-        cw, ch = console.size
+        cw, ch = _cached_console_size(console)
         target_h_px = max(2, (ch - 2) * 2)
         if img.width > cw or img.height > target_h_px:
             factor = min(cw / img.width, target_h_px / img.height)

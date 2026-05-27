@@ -59,20 +59,27 @@ class SignatureRecord:
 
 def scan_project(repo: Path, max_files: int = 80,
                  max_bytes_per_file: int = 4000) -> list[tuple[str, str]]:
-    """Recolecta archivos del repo (Python/TS/MD/configs) limitando tamaño."""
+    """Recolecta archivos del repo (Python/TS/MD/configs) limitando tamaño.
+
+    Uses os.walk + in-place dirname pruning so excluded trees (.venv,
+    node_modules, .git) are never descended — vs the prior rglob which
+    materialized every path in the repo, sorted, and only THEN excluded.
+    """
+    import os
     files: list[tuple[str, str]] = []
-    for p in sorted(repo.rglob("*")):
-        if any(d in p.parts for d in SCAN_EXCLUDE_DIRS):
-            continue
-        if not p.is_file() or p.suffix not in SCAN_EXTENSIONS:
-            continue
-        try:
-            content = p.read_text(encoding="utf-8", errors="ignore")[:max_bytes_per_file]
-            files.append((str(p.relative_to(repo)), content))
-            if len(files) >= max_files:
-                break
-        except Exception:
-            continue
+    for root, dirnames, fnames in os.walk(repo):
+        dirnames[:] = [d for d in dirnames if d not in SCAN_EXCLUDE_DIRS]
+        for fname in sorted(fnames):
+            p = Path(root) / fname
+            if p.suffix not in SCAN_EXTENSIONS:
+                continue
+            try:
+                content = p.read_text(encoding="utf-8", errors="ignore")[:max_bytes_per_file]
+                files.append((str(p.relative_to(repo)), content))
+                if len(files) >= max_files:
+                    return files
+            except Exception:
+                continue
     return files
 
 
@@ -302,11 +309,91 @@ def _mock_judge_synthesis(atasco: str, proposals: list[Proposal],
     }
 
 
-# ---------- Real-mode scaffolding (anthropic SDK) ----------
+# ---------- Real-mode scaffolding (anthropic SDK, hardened) ----------
+
+_REAL_TIMEOUT_S = 120.0
+_REAL_MAX_RETRIES = 3
+_VALID_BLAST = ("SAFE", "MEDIUM", "RISKY")
+_PROPOSAL_TITLE_MAX = 200
+_PROPOSAL_RATIONALE_MAX = 2000
+_PROPOSAL_FILES_MAX = 10
+_PROPOSAL_FILE_PATH_MAX = 300
+
+
+def _parse_model_json(text: str) -> dict:
+    """Robust JSON extractor for model outputs that may wrap in ```json fences."""
+    text = text.strip()
+    if text.startswith("```"):
+        text = text.strip("` \n")
+        if text.lower().startswith("json"):
+            text = text[4:].strip()
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as e:
+        first = text.find("{")
+        last = text.rfind("}")
+        if first != -1 and last > first:
+            return json.loads(text[first:last + 1])
+        raise
+
+
+def _sanitize_proposal_dict(p: dict, sage_name: str, round_num: int) -> Proposal | None:
+    """Validate + clamp a model-produced proposal. Returns None if malformed."""
+    if not isinstance(p, dict):
+        return None
+    title = str(p.get("title", "")).strip()[:_PROPOSAL_TITLE_MAX]
+    if not title:
+        return None
+    rationale = str(p.get("rationale", "")).strip()[:_PROPOSAL_RATIONALE_MAX]
+    blast = str(p.get("blast_radius", "")).upper().strip()
+    if blast not in _VALID_BLAST:
+        blast = "MEDIUM"
+    files_raw = p.get("files_touched", []) or []
+    if not isinstance(files_raw, list):
+        files_raw = []
+    files = [
+        str(f).strip()[:_PROPOSAL_FILE_PATH_MAX]
+        for f in files_raw[:_PROPOSAL_FILES_MAX]
+        if isinstance(f, str) and str(f).strip()
+    ]
+    return Proposal(title, rationale, blast, files, sage_name, round_num)
+
+
+async def _anthropic_call_with_retry(coro_factory, label: str,
+                                      timeout_s: float = _REAL_TIMEOUT_S,
+                                      max_retries: int = _REAL_MAX_RETRIES) -> object:
+    """Call `coro_factory()` with timeout + exponential backoff on transient errors.
+
+    `coro_factory` is a zero-arg sync callable returning a fresh coroutine each
+    attempt (anthropic SDK coroutines can only be awaited once).
+    """
+    last_err: Exception | None = None
+    for attempt in range(1, max_retries + 1):
+        try:
+            return await asyncio.wait_for(coro_factory(), timeout=timeout_s)
+        except asyncio.TimeoutError as e:
+            last_err = e
+            wait_s = min(2 ** attempt, 16)
+        except Exception as e:  # APIError, RateLimitError, transient network
+            last_err = e
+            name = type(e).__name__
+            if name in {"AuthenticationError", "PermissionDeniedError",
+                        "BadRequestError", "NotFoundError"}:
+                raise
+            wait_s = min(2 ** attempt, 16)
+        if attempt < max_retries:
+            await asyncio.sleep(wait_s)
+    raise RuntimeError(
+        f"{label}: failed after {max_retries} attempts. last_error={last_err!r}"
+    ) from last_err
+
 
 async def _real_propose(sage: Sage, briefing: str, atasco: str,
                         round_num: int, proposals_so_far: list[Proposal]) -> list[Proposal]:
-    """Llamada real a Claude. Requiere ANTHROPIC_API_KEY."""
+    """Llamada real a Claude. Requiere ANTHROPIC_API_KEY.
+
+    Hardened: timeout, retry/backoff on transient errors, model output is
+    sanitized and length-capped before constructing Proposals."""
     try:
         from anthropic import AsyncAnthropic
     except ImportError as e:
@@ -320,24 +407,28 @@ async def _real_propose(sage: Sage, briefing: str, atasco: str,
         f"<proposals>\n{json.dumps([asdict(p) for p in proposals_so_far], indent=2)}\n</proposals>\n\n"
         f"Output JSON only."
     )
-    resp = await client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=2000,
-        system=system,
-        messages=[{"role": "user", "content": user_msg}],
+    resp = await _anthropic_call_with_retry(
+        lambda: client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=2000,
+            system=system,
+            messages=[{"role": "user", "content": user_msg}],
+        ),
+        label=f"_real_propose[{sage.id} r{round_num}]",
     )
-    text = resp.content[0].text
     try:
-        data = json.loads(text)
-    except json.JSONDecodeError:
-        # Fallback: el modelo a veces envuelve en markdown
-        text = text.strip("` \n")
-        if text.startswith("json"):
-            text = text[4:].strip()
-        data = json.loads(text)
-    return [Proposal(p["title"], p["rationale"], p["blast_radius"],
-                     p.get("files_touched", []), sage.name_en, round_num)
-            for p in data.get("proposals", data.get("amendments", []))]
+        data = _parse_model_json(resp.content[0].text)
+    except (json.JSONDecodeError, IndexError):
+        return []
+    raw = data.get("proposals", data.get("amendments", []))
+    if not isinstance(raw, list):
+        return []
+    out: list[Proposal] = []
+    for p in raw:
+        sanitized = _sanitize_proposal_dict(p, sage.name_en, round_num)
+        if sanitized is not None:
+            out.append(sanitized)
+    return out
 
 
 async def _real_judge(atasco: str, proposals: list[Proposal],
@@ -354,16 +445,23 @@ async def _real_judge(atasco: str, proposals: list[Proposal],
         f"<signatures>{json.dumps({k: asdict(v) for k, v in signatures.items()}, indent=2)}</signatures>\n\n"
         f"Output JSON only."
     )
-    resp = await client.messages.create(
-        model="claude-opus-4-7",
-        max_tokens=4000,
-        system=render_judge_prompt(),
-        messages=[{"role": "user", "content": user_msg}],
+    resp = await _anthropic_call_with_retry(
+        lambda: client.messages.create(
+            model="claude-opus-4-7",
+            max_tokens=4000,
+            system=render_judge_prompt(),
+            messages=[{"role": "user", "content": user_msg}],
+        ),
+        label="_real_judge",
     )
-    text = resp.content[0].text.strip("` \n")
-    if text.startswith("json"):
-        text = text[4:].strip()
-    return json.loads(text)
+    try:
+        return _parse_model_json(resp.content[0].text)
+    except (json.JSONDecodeError, IndexError):
+        return {
+            "atasco": atasco, "summary": "Judge returned malformed JSON.",
+            "rounds_used": rounds_used, "unanimous": False,
+            "tasks": [], "unresolved_disagreements": [],
+        }
 
 
 # ---------- Main orchestrator ----------
