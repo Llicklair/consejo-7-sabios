@@ -43,7 +43,7 @@ from .scene import (
     apply_lighting, apply_table_decor, compose_room, random_seat_indices,
 )
 from .sound import SoundPlayer
-from .sprites import generate_bubble, generate_palantir
+from .sprites import _draw_number as _sprite_draw_number, generate_bubble, generate_palantir
 from .states import (
     DEFAULT_DEBATE_ROUNDS,
     DEFAULT_TIMINGS,
@@ -53,7 +53,7 @@ from .states import (
     mock_driver,
 )
 
-FPS = 15  # 50% más fluido que 10; aún seguro para terminals con SSH/latencia
+FPS = 10  # bajar a 10 reduce flicker en terminals lentos + render más estable
 FRAME_DT = 1.0 / FPS
 
 COMIC_YELLOW: RGB = (255, 220, 60)
@@ -210,11 +210,8 @@ def _walk_view(dx: int, dy: int) -> str:
 
 
 def _walk_bob(t: float) -> int:
-    """Vertical pixels-up offset for the walking gait at ~2 steps/sec.
-
-    Amplitude 3px = visible gait (sprite ~40px tall, ~7% of body). Goes up to
-    3, stays at 2 most of the cycle, dips to 0 at zero-crossings (foot down)."""
-    return int(abs(math.sin(t * 6.0)) * 3)
+    """Vertical pixels-up offset for the walking gait at ~2 steps/sec."""
+    return int(abs(math.sin(t * 6.0)) * 2)
 
 
 _CONSOLE_SIZE_CACHE: dict = {"t": 0.0, "size": (0, 0)}
@@ -322,24 +319,25 @@ def _draw_palantir_hud(canvas: Image.Image, round_num: int,
     canvas.paste(palantir, (px, py), palantir)
 
     if round_num > 0:
+        # Banner "ROUND N" sobre el palantir, escala 4x — el más visible
+        # del HUD para que sea siempre legible aunque el terminal sea pequeño.
         n_digits = len(str(round_num))
         inner_w = n_digits * 3 + (n_digits - 1)
         pad = 2
         label_w = inner_w + pad * 2
         label_h = 5 + pad * 2
-        label = Image.new("RGBA", (label_w, label_h), (15, 10, 30, 0))
+        label = Image.new("RGBA", (label_w, label_h), (0, 0, 0, 0))
         d = ImageDraw.Draw(label)
         d.rectangle((0, 0, label_w - 1, label_h - 1),
-                    outline=(255, 220, 80, 255), fill=(20, 5, 35, 230))
-        from .sprites import _draw_number as _sprite_draw_number
+                    outline=(255, 230, 90, 255), fill=(25, 8, 40, 240))
         _sprite_draw_number(d, pad, pad, round_num, (255, 250, 220, 255))
-        scale_factor = 3
+        scale_factor = 4
         label = label.resize(
             (label.width * scale_factor, label.height * scale_factor),
             Image.NEAREST,
         )
         bx = px + palantir.width // 2 - label.width // 2
-        by = py - label.height - 1 + float_y
+        by = max(2, py - label.height - 2 + float_y)
         canvas.paste(label, (bx, by), label)
 
     return (px + palantir.width // 2, py + palantir.height // 2 - 4)

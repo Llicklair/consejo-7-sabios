@@ -708,13 +708,52 @@ def render_plan_markdown(plan: dict, execution: dict | None = None) -> str:
             lines.append(f"**{len(execution['skipped'])} tareas pendientes** "
                          "(MEDIUM/RISKY) — revisión manual requerida en el reporte arriba.")
 
+    # Visión estratégica (forward-looking)
+    vision = plan.get("strategic_vision")
+    if isinstance(vision, dict) and vision:
+        lines += ["", "## 🔭 Visión estratégica", ""]
+        if vision.get("headline"):
+            lines.append(f"**{vision['headline']}**")
+            lines.append("")
+        if vision.get("where_to_take_it"):
+            lines.append("### Hacia dónde encauzarlo")
+            lines.append("")
+            lines.append(vision["where_to_take_it"])
+            lines.append("")
+        future_features = vision.get("future_features") or []
+        if future_features:
+            lines.append("### Features futuros propuestos")
+            lines.append("")
+            lines.append("| Horizonte | Feature | Por qué | Sabios |")
+            lines.append("|-----------|---------|---------|--------|")
+            for ff in future_features:
+                horizon = ff.get("horizon", "next-quarter")
+                title = ff.get("title", "?")
+                why = ff.get("why", "")
+                sages = ", ".join(ff.get("supporting_sages") or [])
+                lines.append(f"| `{horizon}` | **{title}** | {why} | {sages} |")
+            lines.append("")
+        threads = vision.get("research_threads") or []
+        if threads:
+            lines.append("### Hilos de investigación abiertos")
+            lines.append("")
+            for t in threads:
+                q = t.get("question", "?")
+                why = t.get("why_it_matters", "")
+                lines.append(f"- **{q}** — {why}")
+            lines.append("")
+
     # Disensos
     if plan.get("unresolved_disagreements"):
         lines += ["", "## Disensos no resueltos", ""]
         for d in plan["unresolved_disagreements"]:
             who = d.get("sage", d.get("topic", "?"))
             what = d.get("critique", d.get("judge_call", ""))
-            lines.append(f"- **{who}**: {what}")
+            if isinstance(d.get("positions"), list):
+                positions = " · ".join(d["positions"])
+                lines.append(f"- **{who}**: {positions}")
+            else:
+                lines.append(f"- **{who}**: {what}")
 
     # Transcripción original en EN (auditabilidad)
     original_en = plan.get("_original_en")

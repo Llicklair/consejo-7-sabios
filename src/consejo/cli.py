@@ -162,9 +162,9 @@ def main() -> None:
     parser.add_argument("--mode", choices=["mock", "real", "claude-code"], default="mock",
                         help="mock = canned proposals · real = anthropic SDK · "
                              "claude-code = 7+2 subagents via Claude Code CLI (no API key)")
-    parser.add_argument("--cc-model", default="sonnet",
+    parser.add_argument("--cc-model", default="opus",
                         help="Model for --mode claude-code (sonnet|opus|alias). "
-                             "Default: sonnet")
+                             "Default: opus (deeper debate; cheaper switch: --cc-model sonnet)")
     parser.add_argument("--rounds", type=int, default=3,
                         help="Rondas objetivo de debate. mock/real: 1..30. "
                              "claude-code: auto-capped to 1-2 (round 1 propose, "
@@ -174,7 +174,10 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=None,
                         help="Semilla para asignación de asientos / mock")
     parser.add_argument("--scale", type=int, default=1)
-    parser.add_argument("--no-sound", action="store_true")
+    parser.add_argument("--sound", action="store_true",
+                        help="Habilita sonido (default: OFF). Por defecto la "
+                             "sesión es silenciosa para no romper grabaciones / "
+                             "reuniones / contextos de oficina.")
     parser.add_argument("--no-ui", action="store_true",
                         help="Modo headless: sin animación, solo logs")
     parser.add_argument("--execute", choices=["none", "auto", "manual"],
@@ -226,7 +229,7 @@ def main() -> None:
             speed=args.speed,
             scale=args.scale,
             seed=args.seed,
-            sound=not args.no_sound,
+            sound=args.sound,
             driver=driver,
         ))
 

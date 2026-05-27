@@ -31,19 +31,37 @@ PROPOSAL_SCHEMA = {
     "properties": {
         "proposals": {
             "type": "array",
-            "minItems": 1,
-            "maxItems": 3,
+            "minItems": 2,
+            "maxItems": 6,
             "items": {
                 "type": "object",
-                "required": ["title", "rationale", "blast_radius"],
+                "required": ["title", "rationale", "blast_radius", "category"],
                 "properties": {
                     "title": {"type": "string", "maxLength": 200},
-                    "rationale": {"type": "string", "maxLength": 2000},
+                    "rationale": {"type": "string", "maxLength": 3000},
                     "blast_radius": {"enum": ["SAFE", "MEDIUM", "RISKY"]},
+                    "category": {
+                        "enum": [
+                            "code-fix",
+                            "future-feature",
+                            "strategic-direction",
+                            "research-thread",
+                        ],
+                        "description": (
+                            "code-fix: improve existing code · "
+                            "future-feature: new capability to build · "
+                            "strategic-direction: where the project should go · "
+                            "research-thread: open question worth investigating"
+                        ),
+                    },
                     "files_touched": {
                         "type": "array",
                         "items": {"type": "string", "maxLength": 300},
                         "maxItems": 10,
+                    },
+                    "horizon": {
+                        "enum": ["now", "next-quarter", "next-year"],
+                        "description": "Time horizon. 'now' = this PR; 'next-quarter' = real work; 'next-year' = vision.",
                     },
                 },
             },
@@ -98,12 +116,13 @@ CRITIQUE_SCHEMA = {
 
 JUDGE_SCHEMA = {
     "type": "object",
-    "required": ["summary", "unanimous", "tasks"],
+    "required": ["summary", "unanimous", "tasks", "strategic_vision"],
     "properties": {
         "summary": {"type": "string"},
         "unanimous": {"type": "boolean"},
         "tasks": {
             "type": "array",
+            "description": "Tactical/code-fix items the user can execute now",
             "items": {
                 "type": "object",
                 "required": ["title", "rationale", "blast_radius", "supporting_sages"],
@@ -111,10 +130,53 @@ JUDGE_SCHEMA = {
                     "title": {"type": "string"},
                     "rationale": {"type": "string"},
                     "blast_radius": {"enum": ["SAFE", "MEDIUM", "RISKY"]},
+                    "category": {"enum": ["code-fix", "future-feature", "strategic-direction", "research-thread"]},
+                    "horizon": {"enum": ["now", "next-quarter", "next-year"]},
                     "supporting_sages": {"type": "array", "items": {"type": "string"}},
                     "files_touched": {"type": "array", "items": {"type": "string"}},
                     "auto_executable": {"type": "boolean"},
                     "priority": {"type": "integer"},
+                },
+            },
+        },
+        "strategic_vision": {
+            "type": "object",
+            "required": ["headline", "where_to_take_it", "future_features", "research_threads"],
+            "description": "Forward-looking synthesis: where the project should go, not just what to fix.",
+            "properties": {
+                "headline": {
+                    "type": "string",
+                    "description": "1-sentence vision statement.",
+                },
+                "where_to_take_it": {
+                    "type": "string",
+                    "description": "2-4 paragraphs on the project's direction over the next year, derived from the council's strategic-direction proposals.",
+                },
+                "future_features": {
+                    "type": "array",
+                    "description": "Concrete new capabilities worth building (not bugs to fix).",
+                    "items": {
+                        "type": "object",
+                        "required": ["title", "why", "horizon"],
+                        "properties": {
+                            "title": {"type": "string"},
+                            "why": {"type": "string"},
+                            "horizon": {"enum": ["next-quarter", "next-year"]},
+                            "supporting_sages": {"type": "array", "items": {"type": "string"}},
+                        },
+                    },
+                },
+                "research_threads": {
+                    "type": "array",
+                    "description": "Open questions worth investigating before committing to a path.",
+                    "items": {
+                        "type": "object",
+                        "required": ["question", "why_it_matters"],
+                        "properties": {
+                            "question": {"type": "string"},
+                            "why_it_matters": {"type": "string"},
+                        },
+                    },
                 },
             },
         },
@@ -138,19 +200,40 @@ def claude_available() -> bool:
 
 def _sage_system_prompt(sage: Sage) -> str:
     return (
-        f"You are the **{sage.name_en}**, one of seven sages convened to review a "
-        f"software project. Six other sages debate beside you; their views often "
-        f"clash with yours — that friction is by design.\n\n"
+        f"You are the **{sage.name_en}**, one of nine sages convened to review a "
+        f"software project IN DEPTH. The other eight sages debate beside you; "
+        f"their views often clash with yours — that friction is by design.\n\n"
         f"## Your expertise\n{sage.expertise_en}\n\n"
         f"## Your voice\n{sage.voice_en}\n\n"
         f"## Your foil\nYour natural opposition is the **{sage.foil_en}**. "
         f"You disagree with them by default — never sign on autopilot.\n\n"
+        f"## Scope of proposals — read carefully\n\n"
+        f"The council is NOT just a linter. Your job covers FOUR distinct kinds "
+        f"of proposals, and a strong sage produces a mix:\n\n"
+        f"  - **`code-fix`**: improve existing code (the linter axis: refactor, "
+        f"tighten, delete dead code, harden inputs, etc.)\n"
+        f"  - **`future-feature`**: a new capability worth building from your "
+        f"axis — something the project does NOT do today but SHOULD.\n"
+        f"  - **`strategic-direction`**: where the project should go over the "
+        f"next quarter / year, derived from your axis. Vision, not tasks.\n"
+        f"  - **`research-thread`**: an open question that needs investigation "
+        f"BEFORE the team picks a path. Articulate the unknown.\n\n"
+        f"Each proposal MUST include `category` (one of the four above) and "
+        f"`horizon` (`now` = this PR · `next-quarter` = real work · "
+        f"`next-year` = vision).\n\n"
         f"## Rules\n"
-        f"1. Propose **1-3 items** maximum. Be picky.\n"
+        f"1. Propose **2-6 items**. A mix of categories is expected; a sage who "
+        f"only offers `code-fix` items is doing half the job.\n"
         f"2. **NO BOILERPLATE.** Generic advice without referencing real symbols, "
-        f"file paths, or line numbers from THIS specific repo will be rejected.\n"
-        f"3. **Stay in role.** Focus on YOUR axis even when other concerns are obvious.\n"
-        f"4. **Output ONLY the JSON object** matching the schema. No prose outside."
+        f"file paths, or specific aspects of THIS repo will be rejected. "
+        f"For `future-feature` and `strategic-direction`: tie the proposal to "
+        f"WHAT THIS PROJECT IS and where it sits in the wider landscape "
+        f"(competitors, adjacent tools, user persona, distribution model).\n"
+        f"3. **Stay in role.** Focus on YOUR axis even when other concerns are "
+        f"obvious — other sages will cover them.\n"
+        f"4. **Depth over breadth.** A single deep `rationale` (3-6 sentences "
+        f"with named evidence) beats five shallow ones.\n"
+        f"5. **Output ONLY the JSON object** matching the schema. No prose outside."
     )
 
 
@@ -159,30 +242,51 @@ def _judge_system_prompt() -> str:
         "You are the **Judge** of the Council of Sages. The roster has nine "
         "voices: 7 visible sages (Architect, Conservative, Modernizer, "
         "Simplifier, Guardian, Optimizer, Ambassador) and 2 voice-only sages "
-        "(Designer, Strategist). Synthesize all of their work into a single "
-        "prioritized plan.\n\n"
-        "You may receive two stages of input:\n"
-        "- `proposals_by_sage`: each sage's round-1 proposals (always present).\n"
-        "- `critiques_by_sage`: each sage's round-2 cross-examination of the "
-        "others' proposals (present when the council ran multi-round debate). "
-        "Each critique has `endorses`, `challenges` (with specific objections), "
-        "and `amendments`.\n\n"
+        "(Designer, Strategist). Synthesize their work into TWO outputs:\n\n"
+        "  1. **`tasks`** — a tactical plan the user can execute. These are "
+        "the `code-fix` items mostly, plus `future-feature` items with "
+        "`horizon=now`.\n"
+        "  2. **`strategic_vision`** — a forward-looking synthesis of where "
+        "the project SHOULD go, derived from the council's `strategic-direction`, "
+        "`future-feature`, and `research-thread` proposals. This is the "
+        "section the user reads to decide what the project IS, not just to fix "
+        "bugs.\n\n"
+        "Both outputs are required.\n\n"
+        "## Inputs\n"
+        "- `proposals_by_sage`: each sage's round-1 proposals, each with a "
+        "`category` (code-fix | future-feature | strategic-direction | "
+        "research-thread) and `horizon` (now | next-quarter | next-year).\n"
+        "- `critiques_by_sage` (optional): each sage's round-2 cross-examination "
+        "with `endorses`, `challenges` (specific objections), and `amendments`.\n\n"
         "## Your responsibilities\n"
-        "1. **Dedupe** proposals that overlap (same idea, different wording).\n"
-        "2. **Sort** by blast_radius: SAFE first, then MEDIUM, then RISKY.\n"
-        "3. **Aggregate supporting_sages** when multiple sages converged. "
-        "When a proposal is endorsed by sages other than the original proposer "
-        "via `endorses`, add those endorsers to supporting_sages.\n"
-        "4. **Surface dissents as unresolved_disagreements** — not silent compromises. "
-        "When a sage `challenges` another sage's proposal with a substantive "
-        "objection, the synthesis MUST either:\n"
-        "  (a) drop the challenged proposal if the objection is decisive, OR\n"
-        "  (b) include it AND record the disagreement with both positions named. "
-        "Never paper over a real disagreement to look unanimous.\n"
-        "5. **Amendments** from round 2 may join the plan as their own tasks or "
-        "merge with existing proposals.\n"
-        "6. **Assign priority** to each task (1 = highest).\n"
-        "7. **Auto-executable:** mark SAFE tasks with no unresolved challenges as auto_executable=true.\n\n"
+        "1. **Dedupe** proposals that overlap (same idea, different wording). "
+        "Aggregate `supporting_sages` when multiple sages converged. When "
+        "`critiques.endorses` mentions a proposal, add the endorser too.\n"
+        "2. **Sort tactical `tasks`** by blast_radius (SAFE → MEDIUM → RISKY) "
+        "and assign 1-based `priority`.\n"
+        "3. **Build `strategic_vision`**:\n"
+        "   - `headline`: ONE sentence that names where the project is going.\n"
+        "   - `where_to_take_it`: 2-4 paragraphs synthesizing the "
+        "`strategic-direction` proposals into a coherent direction. Be opinionated. "
+        "Name the user persona, the distribution channel, the moat. If sages "
+        "disagree on direction, declare a default and note the alternative.\n"
+        "   - `future_features`: concrete new capabilities (from `future-feature` "
+        "proposals and amendments). Each names what it adds and why.\n"
+        "   - `research_threads`: open questions worth investigating BEFORE "
+        "the team commits to a path (from `research-thread` proposals).\n"
+        "4. **Surface dissents** as `unresolved_disagreements` when a sage "
+        "challenges another with a substantive objection. Drop the challenged "
+        "proposal OR include it and name both positions. Never paper over "
+        "real disagreement to look unanimous.\n"
+        "5. **Auto-executable**: SAFE `code-fix` tasks with no unresolved "
+        "challenges → `auto_executable=true`. Never mark `future-feature` or "
+        "`strategic-direction` items auto-executable; those need human steering.\n\n"
+        "## Depth bar\n"
+        "Write at the level the user explicitly asked for: STRICTLY DEEP and "
+        "RELEVANT TO THIS SPECIFIC PROJECT. A judge whose `strategic_vision` "
+        "could apply to any Python repo has failed. Tie every observation to "
+        "what THIS project is, who its user is, and where it sits among "
+        "alternatives.\n\n"
         "Output ONLY the JSON matching the schema. No prose outside."
     )
 
@@ -444,13 +548,15 @@ async def judge_synthesis(
     rounds_used: int = 1,
     model: str = "opus",
 ) -> dict:
-    """Run the judge to synthesize all proposals into a prioritized plan."""
+    """Run the judge to synthesize all proposals into a prioritized plan +
+    a strategic vision. Always uses Opus regardless of `model` — synthesis
+    is where depth/coherence pay off the most."""
     inner = await _spawn_claude(
         user_msg=_build_judge_user_message(atasco, proposals_by_sage, critiques_by_sage),
         system_prompt=_judge_system_prompt(),
         schema=JUDGE_SCHEMA,
         repo=Path.cwd(),
-        model=model,
+        model="opus",
     )
     inner["atasco"] = atasco
     inner["rounds_used"] = rounds_used
