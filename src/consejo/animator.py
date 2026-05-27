@@ -62,7 +62,7 @@ STATE_SUBTITLES: dict[State, str] = {
     State.ENTRANDO:     "Los siete sabios cruzan el corredor hacia tu cámara...",
     State.SENTANDOSE:   "Toman asiento. El Mago levanta la mirada hacia ti.",
     State.ANALIZANDO:   "🔮 «Bienvenido, fundador. Analizamos tu proyecto y pronto debatiremos.»",
-    State.DEBATE:       "Ronda {round} · El debate arde · ✦ cada sello = un sabio que firma",
+    State.DEBATE:       "Ronda {round} · turno {turn} · habla {speaker} · plan: {plan_size} ítems · ✦ {n_signed}/9 firmas",
     State.JUEZ:         "El juez sopesa las voces y sintetiza el veredicto...",
     State.ACUERDO:      "Acuerdo alcanzado. Las siete firmas brillan sobre la mesa.",
     State.LEVANTANDOSE: "Los sabios se levantan, satisfechos.",
@@ -541,6 +541,9 @@ async def animate(speed: float = 1.0, scale: int = 1,
         "signed": set(),       # set de sage_idx que han firmado
         "new_signs_t": 0.0,    # timestamp última firma (para anim. pop-in)
         "new_signs": [],       # sage_idx que firmaron en la ronda actual
+        "turn": 0,             # turno actual (consensus mode)
+        "speaker": "",         # sage_id hablando ahora (consensus mode)
+        "plan_size": 0,        # items en el plan (consensus mode)
     }
 
     def renderable() -> Group:
@@ -567,8 +570,16 @@ async def animate(speed: float = 1.0, scale: int = 1,
                              Image.NEAREST)
         pixels = Pixels.from_image(img)
         sub_template = STATE_SUBTITLES[state]
-        sub = sub_template.format(round=current["round_num"]) \
-            if "{round}" in sub_template else sub_template
+        if "{round}" in sub_template:
+            sub = sub_template.format(
+                round=current["round_num"],
+                turn=current.get("turn", 0),
+                speaker=current.get("speaker", "—"),
+                plan_size=current.get("plan_size", 0),
+                n_signed=len(current["signed"]),
+            )
+        else:
+            sub = sub_template
         if state == State.REPORTE and current.get("report_path"):
             sub = f"Reporte generado: {current['report_path']}"
         subtitle = Text(f"  {sub}", style="bold yellow")
@@ -585,7 +596,17 @@ async def animate(speed: float = 1.0, scale: int = 1,
                 new_signs = event.payload.get("signed_this_round", [])
                 current["new_signs"] = list(new_signs)
                 current["new_signs_t"] = time.monotonic()
-                current["signed"].update(new_signs)
+                # Consensus mode emits the *current* vote state in
+                # total_signed (a sage that flips block→sign→block needs
+                # their seal removed). Use it as the source of truth.
+                tot = event.payload.get("total_signed")
+                if tot is not None:
+                    current["signed"] = set(tot)
+                else:
+                    current["signed"].update(new_signs)
+                current["turn"] = event.payload.get("turn", 0)
+                current["speaker"] = event.payload.get("speaker", "")
+                current["plan_size"] = event.payload.get("plan_size", 0)
 
             # --- SOUND TRIGGERS (polifónicos con pygame.mixer) ---
             if event.state == State.ENTRANDO:
