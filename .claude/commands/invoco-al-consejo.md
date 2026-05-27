@@ -1,5 +1,5 @@
 ---
-description: Lanza al Consejo en el panel terminal de VSCode (envía Ctrl+Shift+B vía SendKeys)
+description: Lanza al Consejo en el panel terminal de VSCode (envía Ctrl+Alt+C vía SendKeys)
 ---
 
 Convoca al Consejo de los 7 Sabios sobre el proyecto actualmente abierto
@@ -8,20 +8,24 @@ en VSCode. Tema hardcodeado, sin prompts.
 ## Cómo lo lanzo
 
 El sandbox Bash de Claude Code en Windows PUEDE enviar keystrokes a la
-ventana activa vía PowerShell SendKeys. La task default build de VSCode
-es **"Consejo: mejorar este proyecto (auto)"** (con `--consensus`, opus,
-20 rondas cap, animación TUI), atada a `Ctrl+Shift+B`. Por tanto enviar
-`^+b` dispara el debate dentro del panel terminal de VSCode.
+ventana activa vía PowerShell SendKeys. En `%APPDATA%\Code\User\
+keybindings.json` está atada **`Ctrl+Alt+C`** a la task user-level
+**"Consejo: debatir el workspace abierto"** (en `%APPDATA%\Code\User\
+tasks.json`), que invoca consejo con `--repo "${workspaceFolder}"` —
+funciona en CUALQUIER proyecto que tengas abierto en VSCode. Opus,
+--consensus, min 5 rondas, max 20, animación TUI. Enviar `^%c` (=
+Ctrl+Alt+C en notación SendKeys) dispara el debate en el panel terminal
+del workspace actual.
 
 Ejecuta exactamente este Bash:
 
 ```bash
-powershell -Command "Add-Type -AssemblyName System.Windows.Forms; Start-Sleep -Milliseconds 300; [System.Windows.Forms.SendKeys]::SendWait('^+b')"
+powershell -Command "Add-Type -AssemblyName System.Windows.Forms; Start-Sleep -Milliseconds 300; [System.Windows.Forms.SendKeys]::SendWait('^%c')"
 ```
 
 ## Antes de lanzar
 
-Avisa al usuario en una línea: "Voy a enviar Ctrl+Shift+B — asegúrate de
+Avisa al usuario en una línea: "Voy a enviar Ctrl+Alt+C — asegúrate de
 que VSCode está en foco (haz click en la ventana si dudas). Te aviso
 cuando lo lance."
 
