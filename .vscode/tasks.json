@@ -21,8 +21,7 @@
         "clear": true,
         "focus": true
       },
-      "problemMatcher": [],
-      "group": { "kind": "build", "isDefault": true }
+      "problemMatcher": []
     },
     {
       "label": "Consejo: invocar (claude-code, animado, 2 rondas)",
@@ -69,7 +68,8 @@
         "clear": true,
         "focus": true
       },
-      "problemMatcher": []
+      "problemMatcher": [],
+      "group": { "kind": "build", "isDefault": true }
     },
     {
       "label": "Consejo: invocar (claude-code, CONSENSUS conversacional)",

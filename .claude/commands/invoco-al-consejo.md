@@ -1,51 +1,51 @@
 ---
-description: Lanza al Consejo en un panel terminal nuevo de VSCode con animación TUI
+description: Lanza al Consejo en un panel terminal nuevo del IDE con animación TUI
 ---
 
-Convoca al Consejo de los 7 Sabios para debatir cómo mejorar el proyecto
-actualmente abierto en VSCode. Tema hardcodeado, sin prompts.
+Convoca al Consejo de los 7 Sabios sobre el proyecto abierto. Tema
+hardcodeado, sin prompts.
 
-## Cómo funciona
+## Limitación técnica conocida
 
-El consejo necesita correr en un terminal real para que la animación TUI
-(rich + rich_pixels) se renderice. Este chat NO es un terminal real, así
-que disparamos una VSCode task vía su URL handler — eso abre un panel
-terminal nuevo en VSC con la animación corriendo en directo.
+El sandbox Bash de Claude Code en Windows NO puede:
+- Spawnear procesos detached (ventanas terminal nuevas)
+- Disparar URL handlers (`vscode://`, `cursor://`)
+- Ejecutar comandos del IDE programáticamente
 
-## Lánzalo así
+Verificado con `Start-Process notepad` → falla con
+"InvalidOperationException" típico de sesión no-interactiva.
 
-Ejecuta este Bash (NO en background — es solo para abrir el panel; el
-debate corre dentro de VSC):
+Por eso este slash command NO ejecuta nada por ti — solo te muestra el
+botón/atajo para que TÚ dispares la task con un keystroke o click.
 
-```bash
-code --open-url 'cursor://command/workbench.action.tasks.runTask?args=%5B%22Consejo%3A%20mejorar%20este%20proyecto%20(auto)%22%5D'
-```
+## Lo que debes mostrar al usuario
 
-(Si tu IDE es VSCode en vez de Cursor, cambia `cursor://` por `vscode://`.)
+Imprime exactamente este bloque (sin ejecutar ningún Bash):
 
-Esto le pide al IDE que ejecute la task **"Consejo: mejorar este
-proyecto (auto)"** definida en `.vscode/tasks.json`, que a su vez:
-- Abre un panel terminal nuevo en VSC (`presentation.panel: "new"`)
-- Corre `python -m consejo.cli "¿Cómo mejoramos este proyecto?" --mode
-  claude-code --consensus --consensus-rounds 20 --cc-model opus --speed 0.3`
-- La animación TUI corre en ese panel
-- El reporte se genera al final en `${workspaceFolder}/consejo-report-*.md`
+> 🔮 **Lanza el debate desde tu IDE:**
+>
+> **Opción A (1 keystroke):** pulsa `Ctrl+Shift+B` — está configurada como
+> default build task la `Consejo: mejorar este proyecto (auto)`.
+>
+> **Opción B (click):** haz click en este link:
+> [▶ Ejecutar Consejo (consenso, opus, ~30-60 min)](command:workbench.action.tasks.runTask?%5B%22Consejo%3A%20mejorar%20este%20proyecto%20(auto)%22%5D)
+>
+> **Opción C (manual):** `Ctrl+Shift+P` → "Tasks: Run Task" → "Consejo:
+> mejorar este proyecto (auto)".
+>
+> Cualquiera abre un panel terminal nuevo en el IDE con la animación TUI
+> corriendo el debate consensus turn-by-turn (Opus, 20 rondas cap, tema
+> "¿Cómo mejoramos este proyecto?"). Tardará ~30-60 min. Cuando termine,
+> el reporte queda en `consejo-report-*.md`.
 
-## Después del comando
+## Después
 
-1. Confirma al usuario que el panel debería haberse abierto. Si no
-   apareció, posibles causas:
-   - VSCode no está abierto sobre `d:\consejo-7-sabios` → pide que lo abra
-   - El URL handler de `code://` no está registrado → fallback: dile que
-     use Ctrl+Shift+P → "Tasks: Run Task" → la misma task
-2. Dile que el debate tardará ~30-60 min con Opus + consenso conversacional.
-3. Cuando termine, el reporte queda en cwd; si el usuario quiere que lo
-   leas y resumas, ofrécelo.
+Cuando el usuario te diga que ya terminó (o tras el tiempo), si quiere
+puedes leer el reporte más reciente y resumirle plan + visión.
 
 ## NO hagas
 
-- NO lances el python directamente con Bash + run_in_background aquí: la
-  animación NO se renderiza en este chat (es lo que el usuario quiere
-  evitar). El propósito de este slash command es disparar VSC, no
-  ejecutar el debate dentro del chat.
+- NO intentes `code --open-url`, `start`, `Start-Process` o similares —
+  todos fallan en este sandbox.
+- NO ejecutes el python en background aquí (la animación no se ve en chat).
 - NO modifiques código del proyecto durante esta invocación.
