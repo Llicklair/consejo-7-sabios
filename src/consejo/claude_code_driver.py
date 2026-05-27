@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import random
 import re
 import shutil
 import subprocess
@@ -727,4 +728,475 @@ async def judge_synthesis(
     )
     inner["atasco"] = atasco
     inner["rounds_used"] = rounds_used
+    return inner
+
+
+# ---------------------------------------------------------------------------
+# Consensus dialogue mode — turn-by-turn round-robin until unanimity
+# ---------------------------------------------------------------------------
+
+TURN_SCHEMA = {
+    "type": "object",
+    "required": ["message", "plan_diff", "vote"],
+    "properties": {
+        "message": {
+            "type": "string",
+            "description": (
+                "What you say to the council this turn. Address other sages "
+                "by id when reacting. Keep it under 6 sentences."
+            ),
+        },
+        "plan_diff": {
+            "type": "object",
+            "properties": {
+                "add": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "required": ["title", "rationale", "blast_radius"],
+                        "properties": {
+                            "title": {"type": "string"},
+                            "rationale": {"type": "string"},
+                            "blast_radius": {"enum": ["SAFE", "MEDIUM", "RISKY"]},
+                            "category": {
+                                "enum": [
+                                    "code-fix", "future-feature",
+                                    "strategic-direction", "research-thread",
+                                ],
+                            },
+                            "horizon": {"enum": ["now", "next-quarter", "next-year"]},
+                            "files_touched": {"type": "array", "items": {"type": "string"}},
+                        },
+                    },
+                },
+                "amend": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "required": ["target_title"],
+                        "properties": {
+                            "target_title": {"type": "string"},
+                            "new_title": {"type": "string"},
+                            "new_rationale": {"type": "string"},
+                            "new_blast_radius": {"enum": ["SAFE", "MEDIUM", "RISKY"]},
+                        },
+                    },
+                },
+                "remove": {"type": "array", "items": {"type": "string"}},
+            },
+        },
+        "vote": {
+            "type": "object",
+            "required": ["signed"],
+            "properties": {
+                "signed": {
+                    "type": "boolean",
+                    "description": (
+                        "true ONLY if you endorse every current plan item AND "
+                        "the plan is non-empty."
+                    ),
+                },
+                "objections": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Titles of items you block. Empty if signed=true.",
+                },
+                "reasoning": {"type": "string"},
+            },
+        },
+    },
+}
+
+
+def _consensus_system_prompt(sage: Sage) -> str:
+    return (
+        f"You are the **{sage.name_en}**, one of nine sages in a TURN-BY-TURN "
+        f"conversational debate. The goal is UNANIMOUS consensus on a plan — "
+        f"but a fast unanimous yes is INDISTINGUISHABLE from groupthink, and "
+        f"groupthink fails the council. Real consensus survives challenge.\n\n"
+        f"## Your expertise\n{sage.expertise_en}\n\n"
+        f"## Your voice\n{sage.voice_en}\n\n"
+        f"## Your foil\nYour natural opposition is the **{sage.foil_en}**. "
+        f"Push back on their items hardest — but with substance.\n\n"
+        f"## Protocol\n"
+        f"Each turn you receive: the FULL transcript so far, the CURRENT PLAN, "
+        f"and the LATEST VOTES. You emit one structured response with three parts:\n\n"
+        f"1. **message** — what you say aloud to the council. Address other "
+        f"sages by id (e.g., 'arquitecto', 'conservador'). React to specific "
+        f"things they said. Keep it under 6 sentences. This is the visible debate.\n\n"
+        f"2. **plan_diff** — concrete changes to the plan: `add` new items "
+        f"from YOUR axis, `amend` existing ones (rewrite a rationale to address "
+        f"your objection, narrow scope, change blast_radius), `remove` items "
+        f"that shouldn't be there.\n\n"
+        f"3. **vote** — `signed: true` ONLY when (a) the plan reflects YOUR "
+        f"axis with at least one item you proposed or amended, AND (b) you can "
+        f"endorse every other item. Otherwise `signed: false` with `objections` "
+        f"listing the offending titles and a one-line `reasoning`.\n\n"
+        f"## Friction discipline (this matters)\n"
+        f"- **NEVER sign on round 1.** Round 1 is for proposing your axis and "
+        f"challenging weak items. You may only sign from round 2 onwards, and "
+        f"only after you have contributed at least one `add` or `amend`.\n"
+        f"- **Easy unanimity is a failure mode.** If everyone signs without any "
+        f"amendment or challenge, the debate was theater. Force friction: even "
+        f"if you mostly agree, identify the WEAKEST item and either amend it "
+        f"or block it.\n"
+        f"- **Stay in role under pressure.** Other sages will try to corral you "
+        f"into the median view. Resist. Your axis is the council's value.\n"
+        f"- **BLOCK only with a remedy.** Pure 'I don't like this' vetoes are "
+        f"filtered. Every objection must come with an amendment that would "
+        f"resolve it.\n"
+        f"- **Cite real files/symbols** from this repo when proposing or amending. "
+        f"Generic linter advice is rejected.\n"
+        f"- **Don't churn.** If you amended an item last turn and another sage "
+        f"endorsed the amendment, move on.\n\n"
+        f"## Output\n"
+        f"Emit ONLY the JSON object matching the schema. No prose outside, no "
+        f"markdown fences. The JSON IS your turn."
+    )
+
+
+def _format_transcript_for_turn(
+    transcript: list[dict], max_msg_chars: int = 800,
+) -> str:
+    """Render the transcript compactly. Truncate long messages but keep votes."""
+    if not transcript:
+        return "(empty — you speak first)"
+    lines = []
+    for e in transcript:
+        msg = e.get("message", "")
+        if len(msg) > max_msg_chars:
+            msg = msg[:max_msg_chars] + "…[truncated]"
+        v = e.get("vote", {}) or {}
+        sig = "SIGNED" if v.get("signed") else "BLOCK"
+        objs = v.get("objections", []) or []
+        objs_str = f" objections={objs}" if objs else ""
+        lines.append(
+            f"--- turn {e['turn']} · {e['sage_id']} · {sig}{objs_str} ---\n  {msg}"
+        )
+    return "\n".join(lines)
+
+
+def _consensus_turn_user_message(
+    atasco: str, repo: Path, sage: Sage,
+    transcript: list[dict], plan: list[dict],
+    round_num: int, max_rounds: int, turn_in_round: int, total_sages: int,
+) -> str:
+    plan_repr = json.dumps(plan, indent=2) if plan else "(empty — propose initial items)"
+    return (
+        f"<atasco>{atasco}</atasco>\n"
+        f"<repo>{repo.resolve()}</repo>\n"
+        f"<round>{round_num}/{max_rounds}</round>\n"
+        f"<turn_in_round>{turn_in_round}/{total_sages}</turn_in_round>\n"
+        f"<your_id>{sage.id}</your_id>\n\n"
+        f"<current_plan>\n{plan_repr}\n</current_plan>\n\n"
+        f"<transcript>\n{_format_transcript_for_turn(transcript)}\n</transcript>\n\n"
+        f"It is your turn. You may use Read/Glob/Grep (max 3 calls) ONLY to "
+        f"verify a specific claim — not to re-explore the repo from scratch.\n\n"
+        f"Emit your turn as a single JSON object with this shape:\n"
+        f"```json\n{json.dumps(TURN_SCHEMA, indent=2)}\n```\n\n"
+        f"Output ONLY the JSON object. No prose outside, no markdown fences."
+    )
+
+
+def _apply_plan_diff(plan: list[dict], diff: dict) -> list[dict]:
+    """Return a new plan with the diff applied. Idempotent on duplicates."""
+    if not diff:
+        return plan
+    out = [dict(p) for p in plan]
+    titles = {p.get("title"): i for i, p in enumerate(out)}
+    for new_item in diff.get("add", []) or []:
+        t = new_item.get("title")
+        if t and t not in titles:
+            out.append(new_item)
+            titles[t] = len(out) - 1
+    for amend in diff.get("amend", []) or []:
+        target = amend.get("target_title")
+        if target not in titles:
+            continue
+        item = out[titles[target]]
+        if "new_title" in amend:
+            new_t = amend["new_title"]
+            del titles[target]
+            item["title"] = new_t
+            titles[new_t] = out.index(item)
+        if "new_rationale" in amend:
+            item["rationale"] = amend["new_rationale"]
+        if "new_blast_radius" in amend:
+            item["blast_radius"] = amend["new_blast_radius"]
+    for rm in diff.get("remove", []) or []:
+        if rm in titles:
+            out = [p for p in out if p.get("title") != rm]
+            titles = {p.get("title"): i for i, p in enumerate(out)}
+    return out
+
+
+def _is_unanimous(plan: list[dict], votes: dict[str, dict], sage_ids: list[str]) -> bool:
+    if not plan:
+        return False
+    for sid in sage_ids:
+        v = votes.get(sid)
+        if not v or not v.get("signed"):
+            return False
+        if v.get("objections"):
+            return False
+    return True
+
+
+async def consensus_dialogue(
+    atasco: str,
+    repo: Path,
+    sages: list[Sage],
+    max_rounds: int = 20,
+    model: str = "sonnet",
+    on_turn=None,
+) -> dict:
+    """Round-robin turn-by-turn dialogue until all sages sign the same plan.
+
+    Each turn carries the full transcript + current plan. A round = one turn
+    per sage in ALL_SAGES order. Stops at unanimity or `max_rounds`.
+
+    Returns a dict shaped like `judge_synthesis`'s output so the existing
+    report writer works unchanged.
+    """
+    transcript: list[dict] = []
+    plan: list[dict] = []
+    votes: dict[str, dict] = {}
+    sage_ids = [s.id for s in sages]
+    turn_counter = 0
+    rounds_used = 0
+    converged_at_round: int | None = None
+
+    rng = random.Random()
+    contributed: set[str] = set()  # sage ids that have added or amended at least once
+
+    for r in range(1, max_rounds + 1):
+        rounds_used = r
+        round_order = list(sages)
+        rng.shuffle(round_order)
+        for i, sage in enumerate(round_order, start=1):
+            turn_counter += 1
+            user_msg = _consensus_turn_user_message(
+                atasco, repo, sage, transcript, plan,
+                round_num=r, max_rounds=max_rounds,
+                turn_in_round=i, total_sages=len(sages),
+            )
+            try:
+                turn_out = await _spawn_claude(
+                    user_msg=user_msg,
+                    system_prompt=_consensus_system_prompt(sage),
+                    schema=TURN_SCHEMA,
+                    repo=repo,
+                    model=model,
+                    allowed_tools="Read,Glob,Grep",
+                    timeout_s=420.0,
+                )
+            except Exception as e:
+                print(
+                    f"[sage-fail] {sage.id} turn {turn_counter} (r{r}): "
+                    f"{str(e)[:400]}",
+                    file=sys.stderr,
+                )
+                turn_out = {
+                    "message": "(turn failed — abstaining this round)",
+                    "plan_diff": {},
+                    "vote": {
+                        "signed": False,
+                        "objections": [],
+                        "reasoning": "turn failed",
+                    },
+                }
+
+            diff = turn_out.get("plan_diff") or {}
+            if (diff.get("add") or diff.get("amend")):
+                contributed.add(sage.id)
+            plan = _apply_plan_diff(plan, diff)
+            vote = turn_out.get("vote") or {}
+            # Server-side enforcement of friction discipline. The model knows
+            # the rule from the system prompt; this guarantees it isn't bypassed.
+            if r == 1 and vote.get("signed"):
+                vote = {**vote, "signed": False,
+                        "reasoning": "(blocked: round 1 sign suppressed — propose or amend first)"}
+            elif vote.get("signed") and sage.id not in contributed:
+                vote = {**vote, "signed": False,
+                        "reasoning": "(blocked: must add or amend at least one item before signing)"}
+            votes[sage.id] = vote
+            entry = {
+                "turn": turn_counter,
+                "round": r,
+                "sage_id": sage.id,
+                "message": turn_out.get("message", ""),
+                "vote": vote,
+            }
+            transcript.append(entry)
+            print(
+                f"[turn {turn_counter:>3} · r{r} · {sage.id:>14}] "
+                f"{'SIGN' if vote.get('signed') else 'BLOCK'} "
+                f"plan={len(plan)} obj={len(vote.get('objections') or [])}",
+                file=sys.stderr,
+            )
+            if on_turn:
+                await on_turn(sage, turn_counter, r, entry, plan, votes)
+
+        if _is_unanimous(plan, votes, sage_ids):
+            converged_at_round = r
+            break
+
+    unanimous = converged_at_round is not None
+
+    tasks = []
+    for prio, p in enumerate(plan, start=1):
+        title = p.get("title", "")
+        signers = [
+            sid for sid in sage_ids
+            if votes.get(sid, {}).get("signed")
+            and title not in (votes.get(sid, {}).get("objections") or [])
+        ]
+        tasks.append({
+            "priority": prio,
+            "title": title,
+            "rationale": p.get("rationale", ""),
+            "blast_radius": p.get("blast_radius", "MEDIUM"),
+            "category": p.get("category", "code-fix"),
+            "horizon": p.get("horizon", "now"),
+            "files_touched": p.get("files_touched", []),
+            "supporting_sages": signers,
+            "auto_executable": False,
+        })
+
+    unresolved = []
+    for sid in sage_ids:
+        v = votes.get(sid, {}) or {}
+        for obj_title in (v.get("objections") or []):
+            unresolved.append({
+                "title": obj_title,
+                "objecting_sage": sid,
+                "reasoning": v.get("reasoning", ""),
+            })
+
+    summary = (
+        f"Consenso unánime alcanzado en {converged_at_round} ronda(s) "
+        f"({turn_counter} turnos)."
+        if unanimous else
+        f"Sin unanimidad tras {rounds_used} ronda(s) ({turn_counter} turnos). "
+        f"{len(unresolved)} objeción(es) abierta(s)."
+    )
+
+    return {
+        "summary": summary,
+        "unanimous": unanimous,
+        "tasks": tasks,
+        "strategic_vision": {
+            "headline": "(consensus mode — strategic vision computed separately)",
+            "where_to_take_it": "",
+            "future_features": [],
+            "research_threads": [],
+        },
+        "unresolved_disagreements": unresolved,
+        "transcript": transcript,
+        "atasco": atasco,
+        "rounds_used": rounds_used,
+        "turns_used": turn_counter,
+    }
+
+
+_VISION_SCHEMA = {
+    "type": "object",
+    "required": ["headline", "where_to_take_it"],
+    "properties": {
+        "headline": {"type": "string", "maxLength": 240},
+        "where_to_take_it": {"type": "string"},
+        "future_features": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": ["title", "rationale", "horizon"],
+                "properties": {
+                    "title": {"type": "string"},
+                    "rationale": {"type": "string"},
+                    "horizon": {"enum": ["next-quarter", "next-year"]},
+                    "supporting_sages": {"type": "array", "items": {"type": "string"}},
+                },
+            },
+        },
+        "research_threads": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": ["question", "why_it_matters"],
+                "properties": {
+                    "question": {"type": "string"},
+                    "why_it_matters": {"type": "string"},
+                },
+            },
+        },
+    },
+}
+
+
+async def post_consensus_vision(
+    atasco: str,
+    plan_tasks: list[dict],
+    transcript: list[dict],
+    model: str = "opus",
+) -> dict:
+    """After the council reaches consensus on tactical tasks, generate the
+    strategic_vision separately. The vision is the synthesis layer the user
+    reads to decide what the project IS, not just to fix today.
+
+    Returns a dict shaped like the `strategic_vision` field of the classic
+    judge output.
+    """
+    # Compress the transcript to keep the prompt focused on signal: the final
+    # vote, the items each sage championed, and any unresolved tension.
+    transcript_compact = [
+        {
+            "turn": e["turn"],
+            "sage": e["sage_id"],
+            "signed": bool((e.get("vote") or {}).get("signed")),
+            "msg": (e.get("message") or "")[:400],
+        }
+        for e in transcript[-30:]  # last 30 turns carry the convergence story
+    ]
+    sys_prompt = (
+        "You are the Strategist of the Council. The nine sages have reached "
+        "consensus on the TACTICAL plan. Your job is to read their debate and "
+        "name where the project SHOULD GO — the strategic vision that the "
+        "tactical tasks serve. This is what the user reads to decide what the "
+        "project IS, not just to fix today's bugs.\n\n"
+        "## Required fields\n"
+        "- headline: ONE sentence naming the direction.\n"
+        "- where_to_take_it: 2-4 paragraphs synthesizing the debate into a "
+        "coherent direction. Name the user persona, the distribution channel, "
+        "the moat. Be opinionated. If the debate revealed tension between "
+        "axes (e.g., Conservative vs Modernizer), declare a default and "
+        "explain why.\n"
+        "- future_features: 2-5 concrete capabilities to build next-quarter "
+        "or next-year, drawn from the debate.\n"
+        "- research_threads: 1-3 open questions worth investigating BEFORE "
+        "the team commits to a direction.\n\n"
+        "## Depth bar\n"
+        "STRICTLY DEEP and SPECIFIC to THIS project. A vision that could "
+        "apply to any Python repo has failed. Cite the council's own words "
+        "and the project's actual context.\n\n"
+        "## Output\n"
+        "Emit ONLY the JSON object. No prose, no markdown fences."
+    )
+    user_msg = (
+        f"<atasco>{atasco}</atasco>\n\n"
+        f"<agreed_plan>\n{json.dumps(plan_tasks, indent=2)}\n</agreed_plan>\n\n"
+        f"<debate_transcript_tail>\n"
+        f"{json.dumps(transcript_compact, indent=2)}\n"
+        f"</debate_transcript_tail>\n\n"
+        f"## Required output shape\n"
+        f"```json\n{json.dumps(_VISION_SCHEMA, indent=2)}\n```\n\n"
+        f"Output ONLY the JSON object. No prose outside, no markdown fences."
+    )
+    inner = await _spawn_claude(
+        user_msg=user_msg,
+        system_prompt=sys_prompt,
+        schema=_VISION_SCHEMA,
+        repo=Path.cwd(),
+        model=model,
+        allowed_tools="",
+    )
     return inner

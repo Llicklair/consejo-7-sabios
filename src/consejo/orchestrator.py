@@ -21,6 +21,7 @@ from __future__ import annotations
 import asyncio
 import json
 import random
+import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -473,7 +474,9 @@ async def run_council(atasco: str, repo: Path, bus: EventBus,
                       speed: float = 1.0,
                       seed: int | None = None,
                       atasco_lang: str = "es",
-                      cc_model: str = "sonnet") -> dict:
+                      cc_model: str = "sonnet",
+                      consensus_mode: bool = False,
+                      consensus_max_rounds: int = 20) -> dict:
     """Ejecuta el consejo completo y empuja eventos al bus para el animator.
 
     `atasco_lang`: idioma del atasco del usuario ('es' o 'en'). Si es 'es' y
@@ -498,6 +501,68 @@ async def run_council(atasco: str, repo: Path, bus: EventBus,
     # claude-code mode: sages run as parallel `claude -p` subprocesses; they
     # do their own repo reading and there is no multi-round sign/amend loop.
     # The ANALIZANDO phase covers the time the subagents work in parallel.
+    if mode == "claude-code" and consensus_mode:
+        from .claude_code_driver import consensus_dialogue, post_consensus_vision
+        from .sages import ALL_SAGES
+        await asyncio.sleep(2.0 / speed)
+
+        prev_signed: set[int] = set()
+
+        async def _on_turn(sage, turn_num, round_num, entry, current_plan, current_votes):
+            # Build the current vote state across all VISIBLE sages (SAGES).
+            # Voice-only sages still speak but do not occupy seats, so they
+            # don't appear in the animator. Vote state is REPLACED each turn,
+            # not accumulated — a sage that signs then later blocks must lose
+            # their seal in the animation.
+            currently_signed: list[int] = []
+            for i, s in enumerate(SAGES):
+                v = current_votes.get(s.id, {}) or {}
+                if v.get("signed"):
+                    currently_signed.append(i)
+            new_signs = sorted(set(currently_signed) - prev_signed)
+            prev_signed.clear()
+            prev_signed.update(currently_signed)
+            speaker_idx = SAGES.index(sage) if sage in SAGES else -1
+            await emit(State.DEBATE, round_num=round_num, payload={
+                "signed_this_round": new_signs,
+                "total_signed": currently_signed,
+                "turn": turn_num,
+                "speaker": sage.id,
+                "speaker_idx": speaker_idx,
+                "plan_size": len(current_plan),
+                "voice_only": speaker_idx == -1,
+            })
+
+        plan = await consensus_dialogue(
+            atasco, repo, list(ALL_SAGES),
+            max_rounds=consensus_max_rounds,
+            model=cc_model,
+            on_turn=_on_turn,
+        )
+        plan["atasco_es"] = atasco_es_original
+        plan["atasco_en"] = atasco
+        await asyncio.sleep(2.0 / speed)
+        await emit(State.JUEZ)
+        if plan.get("unanimous"):
+            try:
+                vision = await post_consensus_vision(
+                    atasco, plan.get("tasks") or [],
+                    plan.get("transcript") or [],
+                    model="opus",
+                )
+                plan["strategic_vision"] = vision
+            except Exception as e:
+                print(f"[vision-fail] {str(e)[:400]}", file=sys.stderr)
+        await asyncio.sleep(1.0 / speed)
+        await emit(State.ACUERDO)
+        await asyncio.sleep(2.0 / speed)
+        await emit(State.LEVANTANDOSE)
+        await asyncio.sleep(1.5 / speed)
+        await emit(State.SALIENDO)
+        await asyncio.sleep(4.0 / speed)
+        await emit(State.REPORTE, payload={"plan": plan})
+        return plan
+
     if mode == "claude-code":
         from .claude_code_driver import (
             gather_all_proposals, gather_all_critiques, judge_synthesis,
