@@ -47,6 +47,7 @@ def _build_driver(atasco: str, repo: Path, mode: str, speed: float,
                   cc_model: str = "sonnet",
                   consensus_mode: bool = False,
                   consensus_max_rounds: int = 20,
+                  consensus_min_rounds: int = 1,
                   out_holder: dict | None = None):
     """Devuelve una corutina (bus) -> None lista para pasar al animator.
 
@@ -69,6 +70,7 @@ def _build_driver(atasco: str, repo: Path, mode: str, speed: float,
             cc_model=cc_model,
             consensus_mode=consensus_mode,
             consensus_max_rounds=consensus_max_rounds,
+            consensus_min_rounds=consensus_min_rounds,
         )
         execution = None
         if execute_mode == "auto" and await is_git_repo(repo):
@@ -95,6 +97,7 @@ async def _run_headless(atasco: str, repo: Path, mode: str, speed: float,
                         cc_model: str = "sonnet",
                         consensus_mode: bool = False,
                         consensus_max_rounds: int = 20,
+                        consensus_min_rounds: int = 1,
                         out_holder: dict | None = None) -> Path:
     bus = EventBus()
     driver = _build_driver(atasco, repo, mode, speed, target_rounds, seed,
@@ -103,6 +106,7 @@ async def _run_headless(atasco: str, repo: Path, mode: str, speed: float,
                            cc_model=cc_model,
                            consensus_mode=consensus_mode,
                            consensus_max_rounds=consensus_max_rounds,
+                           consensus_min_rounds=consensus_min_rounds,
                            out_holder=out_holder)
 
     async def consume_print() -> None:
@@ -200,6 +204,10 @@ def main() -> None:
     parser.add_argument("--consensus-rounds", type=int, default=20,
                         help="Cap de rondas en --consensus (default: 20). "
                              "Cada ronda son 9 turnos (1 por sabio).")
+    parser.add_argument("--consensus-min-rounds", type=int, default=1,
+                        help="Floor de rondas mínimas (default: 1). Fuerza "
+                             "al consejo a seguir aunque firmen todos antes. "
+                             "Sube a 5+ si convergen demasiado rápido.")
     args = parser.parse_args()
 
     atasco = args.atasco_en if args.atasco_en else args.atasco
@@ -247,6 +255,7 @@ def main() -> None:
             cc_model=args.cc_model,
             consensus_mode=args.consensus,
             consensus_max_rounds=args.consensus_rounds,
+            consensus_min_rounds=args.consensus_min_rounds,
             out_holder=out_holder,
         ))
     else:
@@ -258,6 +267,7 @@ def main() -> None:
                                cc_model=args.cc_model,
                                consensus_mode=args.consensus,
                                consensus_max_rounds=args.consensus_rounds,
+                               consensus_min_rounds=args.consensus_min_rounds,
                                out_holder=out_holder)
         asyncio.run(animate(
             speed=args.speed,

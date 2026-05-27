@@ -35,3 +35,4 @@ consejo-report-*.md
 # Assets generados proceduralmente (regenerables con `python -m consejo.sprites`
 # y `python -m consejo.sound`). Demos curados viven en docs/.
 assets/
+.claude/settings.local.json

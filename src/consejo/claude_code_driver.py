@@ -836,6 +836,12 @@ def _consensus_system_prompt(sage: Sage) -> str:
         f"- **NEVER sign on round 1.** Round 1 is for proposing your axis and "
         f"challenging weak items. You may only sign from round 2 onwards, and "
         f"only after you have contributed at least one `add` or `amend`.\n"
+        f"- **Axis floor: before signing, verify that AT LEAST 2 items in the "
+        f"current plan reflect YOUR specific axis** — not the consensus "
+        f"average, not generic 'good practice'. If the plan is missing your "
+        f"axis, add or amend items to bring it in BEFORE signing. A council "
+        f"that signed a plan with zero items from your specialty has wasted "
+        f"your seat.\n"
         f"- **Easy unanimity is a failure mode.** If everyone signs without any "
         f"amendment or challenge, the debate was theater. Force friction: even "
         f"if you mostly agree, identify the WEAKEST item and either amend it "
@@ -947,13 +953,17 @@ async def consensus_dialogue(
     repo: Path,
     sages: list[Sage],
     max_rounds: int = 20,
+    min_rounds: int = 1,
     model: str = "sonnet",
     on_turn=None,
 ) -> dict:
     """Round-robin turn-by-turn dialogue until all sages sign the same plan.
 
     Each turn carries the full transcript + current plan. A round = one turn
-    per sage in ALL_SAGES order. Stops at unanimity or `max_rounds`.
+    per sage in ALL_SAGES order. Stops at unanimity (only after `min_rounds`)
+    or `max_rounds`. `min_rounds` forces the council to keep iterating even
+    if everyone signs early — useful when premature convergence hides
+    insufficiently-explored axes.
 
     Returns a dict shaped like `judge_synthesis`'s output so the existing
     report writer works unchanged.
@@ -968,6 +978,11 @@ async def consensus_dialogue(
 
     rng = random.Random()
     contributed: set[str] = set()  # sage ids that have added or amended at least once
+    # title -> set of sage_ids that ever blocked it during the debate. Survives
+    # later signing — a sage that blocked X in r1 and signed in r3 still leaves
+    # a fingerprint in dissent_history[X], so the final report can show debate
+    # texture even when the headline says "unánime".
+    dissent_history: dict[str, set[str]] = {}
 
     for r in range(1, max_rounds + 1):
         rounds_used = r
@@ -1020,6 +1035,8 @@ async def consensus_dialogue(
                 vote = {**vote, "signed": False,
                         "reasoning": "(blocked: must add or amend at least one item before signing)"}
             votes[sage.id] = vote
+            for obj_title in (vote.get("objections") or []):
+                dissent_history.setdefault(obj_title, set()).add(sage.id)
             entry = {
                 "turn": turn_counter,
                 "round": r,
@@ -1037,7 +1054,7 @@ async def consensus_dialogue(
             if on_turn:
                 await on_turn(sage, turn_counter, r, entry, plan, votes)
 
-        if _is_unanimous(plan, votes, sage_ids):
+        if r >= min_rounds and _is_unanimous(plan, votes, sage_ids):
             converged_at_round = r
             break
 
@@ -1060,6 +1077,7 @@ async def consensus_dialogue(
             "horizon": p.get("horizon", "now"),
             "files_touched": p.get("files_touched", []),
             "supporting_sages": signers,
+            "dissented_at_some_point": sorted(dissent_history.get(title, set())),
             "auto_executable": False,
         })
 

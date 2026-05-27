@@ -476,7 +476,8 @@ async def run_council(atasco: str, repo: Path, bus: EventBus,
                       atasco_lang: str = "es",
                       cc_model: str = "sonnet",
                       consensus_mode: bool = False,
-                      consensus_max_rounds: int = 20) -> dict:
+                      consensus_max_rounds: int = 20,
+                      consensus_min_rounds: int = 1) -> dict:
     """Ejecuta el consejo completo y empuja eventos al bus para el animator.
 
     `atasco_lang`: idioma del atasco del usuario ('es' o 'en'). Si es 'es' y
@@ -536,6 +537,7 @@ async def run_council(atasco: str, repo: Path, bus: EventBus,
         plan = await consensus_dialogue(
             atasco, repo, list(ALL_SAGES),
             max_rounds=consensus_max_rounds,
+            min_rounds=consensus_min_rounds,
             model=cc_model,
             on_turn=_on_turn,
         )
@@ -746,16 +748,26 @@ def render_plan_markdown(plan: dict, execution: dict | None = None) -> str:
         "",
         "## Plan priorizado",
         "",
-        "| # | Tarea | Sabios | Blast radius | Auto |",
-        "|---|-------|--------|--------------|------|",
+        "| # | Tarea | Sabios | Discrepó (resuelto) | Blast | Auto |",
+        "|---|-------|--------|---------------------|-------|------|",
     ]
+    has_any_dissent = False
     for t in plan["tasks"]:
         sages = ", ".join(t.get("supporting_sages", []))
+        dissent = t.get("dissented_at_some_point") or []
+        dissent_str = ", ".join(dissent) if dissent else "—"
+        if dissent:
+            has_any_dissent = True
         auto = "✅" if t.get("auto_executable") else "⛔"
         lines.append(
             f"| {t['priority']} | **{t['title']}** | {sages} | "
-            f"`{t['blast_radius']}` | {auto} |"
+            f"{dissent_str} | `{t['blast_radius']}` | {auto} |"
         )
+    if has_any_dissent:
+        lines += ["",
+                  "_Columna **Discrepó**: sabios que bloquearon el item en "
+                  "alguna ronda y luego firmaron tras enmiendas — la textura "
+                  "del debate aunque el resultado final sea unánime._"]
 
     # Sección de ejecución (si modo auto se ejecutó)
     if execution:
