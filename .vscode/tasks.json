@@ -112,7 +112,7 @@
     {
       "id": "atasco",
       "type": "promptString",
-      "description": "El atasco que el Consejo debe debatir",
+      "description": "¿Qué quieres que el Consejo debata?",
       "default": "Mejora general del proyecto"
     }
   ]

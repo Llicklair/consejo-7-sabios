@@ -50,7 +50,7 @@ if (-not (Test-Path ".venv\Scripts\python.exe")) {
 }
 
 if (-not $Atasco) {
-    $Atasco = Read-Host "Atasco a debatir (Enter para 'Mejora general del proyecto')"
+    $Atasco = Read-Host "¿Qué quieres debatir? (Enter para 'Mejora general del proyecto')"
     if (-not $Atasco) { $Atasco = "Mejora general del proyecto" }
 }
 
@@ -82,7 +82,7 @@ if ($Consensus) {
 }
 
 Write-Host "🔮 Convocando al Consejo..." -ForegroundColor Cyan
-Write-Host "   Atasco: $Atasco" -ForegroundColor Gray
+Write-Host "   Tema:   $Atasco" -ForegroundColor Gray
 if ($Consensus) {
     Write-Host "   Modo:   $Mode (CONSENSUS, hasta $ConsensusRounds rondas)  ·  Velocidad: $Speed" -ForegroundColor Gray
 } else {

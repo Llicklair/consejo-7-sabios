@@ -20,7 +20,7 @@ if [[ ! -x ".venv/bin/python" && ! -x ".venv/Scripts/python.exe" ]]; then
 fi
 
 if [[ -z "$ATASCO" ]]; then
-    read -rp "Atasco a debatir (Enter para 'Mejora general del proyecto'): " ATASCO
+    read -rp "¿Qué quieres debatir? (Enter para 'Mejora general del proyecto'): " ATASCO
     ATASCO="${ATASCO:-Mejora general del proyecto}"
 fi
 
@@ -42,7 +42,7 @@ ARGS=(-m consejo.cli "$ATASCO" --mode "$MODE" --rounds "$ROUNDS" --speed "$SPEED
 [[ "$CONSENSUS" == "1" ]] && ARGS+=(--consensus --consensus-rounds "$CONSENSUS_ROUNDS")
 
 echo "🔮 Convocando al Consejo..."
-echo "   Atasco: $ATASCO"
+echo "   Tema:   $ATASCO"
 if [[ "$CONSENSUS" == "1" ]]; then
     echo "   Modo:   $MODE (CONSENSUS, hasta $CONSENSUS_ROUNDS rondas)  ·  Velocidad: $SPEED"
 else
