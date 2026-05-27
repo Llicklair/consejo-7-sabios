@@ -345,13 +345,21 @@ def _draw_palantir_hud(canvas: Image.Image, round_num: int,
 
 def _draw_bubbles(canvas: Image.Image, round_state: State,
                   round_num: int, seat_indices: list[int],
-                  t_in_state: float = 0.0) -> None:
+                  t_in_state: float = 0.0,
+                  active_speaker_idx: int | None = None) -> None:
     """Burbujas multi-línea (2-3 líneas) que cambian cada ~1.5s — simulan
-    la conversación en curso. Cada sabio tiene su propio cadencia."""
+    la conversación en curso.
+
+    `active_speaker_idx`: si se pasa (modo consensus turn-by-turn), SOLO
+    se dibuja la burbuja del sabio activo. None = todas las burbujas
+    visibles (modo paralelo clásico).
+    """
     tic = int(t_in_state / 1.5)           # nuevo contenido cada 1.5s
     line_h = GLYPH_SIZE + 2               # altura por línea con gap
 
     for seat_idx, sage_idx in enumerate(seat_indices):
+        if active_speaker_idx is not None and sage_idx != active_speaker_idx:
+            continue
         sage = SAGES[sage_idx]
         _, sage_xy, _view = SEATS[seat_idx]
         # 2 o 3 líneas, fluctúa con sage + tic
@@ -397,7 +405,8 @@ def render_frame(state: State, t_in_state: float, total_dur: float,
                  round_num: int = 0,
                  seat_indices: list[int] | None = None,
                  signed: set | None = None,
-                 new_signs_age: float = 999.0) -> Image.Image:
+                 new_signs_age: float = 999.0,
+                 active_speaker_idx: int | None = None) -> Image.Image:
     """Compone el frame correspondiente a (state, t).
     t_total: tiempo desde el inicio de la sesión (para animaciones cíclicas).
     round_num: número de ronda (sólo significativo en DEBATE).
@@ -486,7 +495,8 @@ def render_frame(state: State, t_in_state: float, total_dur: float,
             p_color = (255, 130, 130)
         _draw_orbit_particles(canvas, pal_center, 18, 9, t_total,
                               n_particles=10, color=p_color)
-        _draw_bubbles(canvas, state, round_num, seat_indices, t_in_state)
+        _draw_bubbles(canvas, state, round_num, seat_indices, t_in_state,
+                      active_speaker_idx=active_speaker_idx)
         _draw_signatures(canvas, seat_indices, signed, t_total, new_signs_age)
 
     elif state == State.JUEZ:
@@ -543,6 +553,7 @@ async def animate(speed: float = 1.0, scale: int = 1,
         "new_signs": [],       # sage_idx que firmaron en la ronda actual
         "turn": 0,             # turno actual (consensus mode)
         "speaker": "",         # sage_id hablando ahora (consensus mode)
+        "speaker_idx": None,   # idx en SAGES del speaker (None=todos hablan)
         "plan_size": 0,        # items en el plan (consensus mode)
     }
 
@@ -558,7 +569,8 @@ async def animate(speed: float = 1.0, scale: int = 1,
                            round_num=current["round_num"],
                            seat_indices=seat_indices,
                            signed=current["signed"],
-                           new_signs_age=new_signs_age)
+                           new_signs_age=new_signs_age,
+                           active_speaker_idx=current.get("speaker_idx"))
         if scale > 1:
             img = upscale(img, scale)
         cw, ch = _cached_console_size(console)
@@ -607,6 +619,11 @@ async def animate(speed: float = 1.0, scale: int = 1,
                 current["turn"] = event.payload.get("turn", 0)
                 current["speaker"] = event.payload.get("speaker", "")
                 current["plan_size"] = event.payload.get("plan_size", 0)
+                # speaker_idx: None = classic mode (no per-turn speaker
+                # → show all bubbles). -1 = voice-only sage speaking
+                # (Designer/Strategist, no seat → no bubble). >=0 =
+                # restrict bubble to that seated sage.
+                current["speaker_idx"] = event.payload.get("speaker_idx")
 
             # --- SOUND TRIGGERS (polifónicos con pygame.mixer) ---
             if event.state == State.ENTRANDO:
