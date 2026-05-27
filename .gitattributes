@@ -1,0 +1,4 @@
+
+# .bat files need CRLF on Windows
+*.bat text eol=crlf
+*.cmd text eol=crlf
