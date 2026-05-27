@@ -1,14 +1,30 @@
 @echo off
 chcp 65001 >nul
+cd /d "%~dp0"
+set PYTHONPATH=src
+
+if not exist ".venv\Scripts\python.exe" (
+    echo.
+    echo [ERROR] No encuentro .venv\Scripts\python.exe
+    echo.
+    echo Crea el venv primero:
+    echo     python -m venv .venv
+    echo     .venv\Scripts\pip install -e .
+    echo.
+    pause
+    exit /b 1
+)
+
 echo.
-echo  Lanzando Consejo de los 7 Sabios en VSCode...
-echo  (debate consensus, opus, ~30-60 min, animacion TUI)
-echo.
-echo  Si VSCode no responde, abre VSCode sobre d:\consejo-7-sabios
-echo  y pulsa Ctrl+Shift+B como fallback.
+echo  Convocando al Consejo de los 7 Sabios
+echo  -------------------------------------
+echo  Tema:    Como mejoramos este proyecto?
+echo  Modo:    claude-code . consenso . opus
+echo  Rondas:  hasta 20 (duracion esperada 30-60 min)
 echo.
 
-start "" "vscode://command/workbench.action.tasks.runTask?args=%%5B%%22Consejo%%3A%%20mejorar%%20este%%20proyecto%%20(auto)%%22%%5D"
+.venv\Scripts\python.exe -m consejo.cli "¿Cómo mejoramos este proyecto?" --mode claude-code --consensus --consensus-rounds 20 --cc-model opus --speed 0.3
 
-timeout /t 3 >nul
-exit
+echo.
+echo  Consejo finalizado. Pulsa una tecla para cerrar.
+pause >nul
