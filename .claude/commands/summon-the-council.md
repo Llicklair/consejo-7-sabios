@@ -1,63 +1,50 @@
 ---
-description: Summons The Council of Seven Sages to debate a project issue
+description: Opens a new VSCode terminal panel running the Council with TUI animation
 ---
 
-The user wants to summon The Council of Seven Sages. The issue is in
-$ARGUMENTS (if empty, briefly ask the user what to debate or default to
-"General project improvement").
+Summon the Council of Seven Sages to debate how to improve the currently
+open VSCode project. Topic is hardcoded; no prompts.
 
-## Before launching — warn the user
+## How it works
 
-`claude-code --consensus` is the REAL debate (not mock):
-- Spawns 9 `claude -p` subprocesses (semaphore caps at 3 concurrent)
-- Round-robin turn-by-turn until unanimity or 20-round cap
-- On serious issues, typically converges in ~11 rounds (~99 turns)
-- Typical duration: 30-60+ minutes wall time
-- Burns real tokens from the user's account; no cost cap
+The council needs a real terminal so the TUI animation (rich + rich_pixels)
+renders. This chat is NOT a real terminal, so we fire a VSCode task via
+its URL handler — that opens a new terminal panel inside VSC with the
+animation running live.
 
-For trivial issues, suggest `--consensus-rounds 5` to shorten.
-For serious issues, the default (20) is appropriate.
+## Launch like this
 
-## Run the council
-
-From `d:\consejo-7-sabios`, claude-code + consensus + headless (the
-pygame animation does not render inside this chat — per-turn log lines
-do show progress):
+Run this Bash (NOT in background — it's just for opening the panel; the
+debate runs inside VSC):
 
 ```bash
-cd d:/consejo-7-sabios && PYTHONPATH=src .venv/Scripts/python.exe -m consejo.cli "$ARGUMENTS" --mode claude-code --consensus --consensus-rounds 20 --cc-model opus --no-ui
+code --open-url 'cursor://command/workbench.action.tasks.runTask?args=%5B%22Consejo%3A%20mejorar%20este%20proyecto%20(auto)%22%5D'
 ```
 
-**Launch in background** (`run_in_background: true` on Bash) and arm a
-Monitor on the log to report per-turn progress without blocking. Useful
-event filter:
+(If your IDE is VSCode instead of Cursor, swap `cursor://` for `vscode://`.)
 
-```
-tail -F <log-path> 2>/dev/null | grep -E --line-buffered "turn [0-9]+ . r[0-9]|Consenso|reporte:|RuntimeError"
-```
+This asks the IDE to run the task **"Consejo: mejorar este proyecto
+(auto)"** defined in `.vscode/tasks.json`, which:
+- Opens a new terminal panel in VSC (`presentation.panel: "new"`)
+- Runs `python -m consejo.cli "¿Cómo mejoramos este proyecto?" --mode
+  claude-code --consensus --consensus-rounds 20 --cc-model opus --speed 0.3`
+- The TUI animation runs in that panel
+- Report is written to `${workspaceFolder}/consejo-report-*.md` at end
 
-## After completion
+## After the command
 
-1. Find the most recent `consejo-report-*.md` generated in cwd.
-2. Read it and show the user:
-   - Executive summary
-   - Prioritized plan table
-   - Strategic vision (headline + 1 paragraph of `where_to_take_it`)
-   - Unresolved disagreements if any
-3. Ask the user if they want to:
-   a) Auto-execute SAFE tasks (`--execute auto`)
-   b) Re-run with Opus for deeper synthesis (`--cc-model opus`)
-   c) Adjust the issue or rounds
+1. Confirm to the user that the panel should have opened. If it didn't:
+   - VSCode isn't open on `d:\consejo-7-sabios` → ask them to open it
+   - The `code://` URL handler isn't registered → fallback: tell them to
+     use Ctrl+Shift+P → "Tasks: Run Task" → the same task
+2. Mention the debate will take ~30-60 min with Opus + consensus dialogue.
+3. When it finishes the report is in cwd; if the user wants you to read
+   and summarize it, offer.
 
-DO NOT modify project code during this invocation — the council only
-proposes and reports. Execution is opt-in via step 3a.
+## DO NOT
 
-If the command fails (e.g. venv missing, `claude` CLI not on PATH),
-inform the user and suggest the appropriate fix.
-
-## If the user wants the animation
-
-Tell them that instead of the slash command they can use the VSCode task
-"Consejo: invocar (claude-code, CONSENSUS conversacional)" (Ctrl+Shift+P
-→ Tasks: Run Task) — that opens a new terminal panel in VSC with the TUI
-animation running live during the debate.
+- DO NOT run python directly via Bash + run_in_background here: the
+  animation does NOT render in this chat (that's what the user is trying
+  to avoid). The point of this slash command is to fire VSC, not to run
+  the debate inside the chat.
+- DO NOT modify project code during this invocation.

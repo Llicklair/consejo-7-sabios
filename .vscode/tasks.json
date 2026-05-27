@@ -48,6 +48,30 @@
       "problemMatcher": []
     },
     {
+      "label": "Consejo: mejorar este proyecto (auto)",
+      "type": "shell",
+      "command": "${workspaceFolder}/.venv/Scripts/python.exe",
+      "args": [
+        "-m", "consejo.cli",
+        "¿Cómo mejoramos este proyecto?",
+        "--mode", "claude-code",
+        "--cc-model", "opus",
+        "--consensus",
+        "--consensus-rounds", "20",
+        "--speed", "0.3"
+      ],
+      "options": {
+        "env": { "PYTHONPATH": "src" }
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "new",
+        "clear": true,
+        "focus": true
+      },
+      "problemMatcher": []
+    },
+    {
       "label": "Consejo: invocar (claude-code, CONSENSUS conversacional)",
       "type": "shell",
       "command": "${workspaceFolder}/.venv/Scripts/python.exe",
