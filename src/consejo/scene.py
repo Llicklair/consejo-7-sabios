@@ -18,7 +18,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw
 from rich.console import Console
 
-from .renderer import ASSETS_DIR, load_sage_sprite, load_tile, render_image
+from .renderer import ASSETS_DIR, load_sage_sprite, load_tile
 from .sages import SAGES
 
 
@@ -387,7 +387,8 @@ def main() -> None:
     print(f"Escena guardada en {args.out.resolve()} ({img.width}x{img.height})")
 
     if not args.no_render:
-        render_image(img, scale=args.scale, console=Console())
+        from rich_pixels import Pixels
+        Console().print(Pixels.from_image(img, resize=(img.width * args.scale, img.height * args.scale)))
 
 
 if __name__ == "__main__":
