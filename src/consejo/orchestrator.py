@@ -24,7 +24,9 @@ import random
 import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+from typing import TypedDict
 
+from . import metrics
 from .sages import SAGES, Sage
 from .states import MAX_DEBATE_ROUNDS, EventBus, State, StateEvent
 from .translator import translate_atasco_to_en, translate_plan_to_es
@@ -37,6 +39,14 @@ SCAN_EXCLUDE_DIRS = {".venv", "venv", "node_modules", ".git", "__pycache__",
                      "build", "dist", ".pytest_cache", ".mypy_cache",
                      ".ruff_cache", "assets"}
 
+# Aggregate payload caps. The 20260527-171503 debate lost unanimity to token
+# exhaustion, not disagreement — these caps make that failure mode impossible.
+# Values are conservative worst-case math (80×4KB ≈ 120KB for scan; 25×1200×~5
+# overhead ≈ 150KB per briefing) and should be tightened once a real-mode
+# debate is instrumented to measure actual consumption.
+MAX_SCAN_PAYLOAD_BYTES = 120_000
+MAX_BRIEFING_PAYLOAD_BYTES = 150_000
+
 
 @dataclass
 class Proposal:
@@ -46,6 +56,18 @@ class Proposal:
     files_touched: list[str]
     proposed_by: str           # sage.name_en
     proposed_round: int = 1
+
+
+class ProposalDict(TypedDict):
+    """Driver-boundary contract for a raw proposal coming back from a sage
+    subprocess (see PROPOSAL_SCHEMA in claude_code_driver). Kept here next to
+    the Proposal dataclass because the orchestrator owns the domain shape —
+    the driver only validates against this contract."""
+    title: str
+    rationale: str
+    blast_radius: str
+    files_touched: list[str]
+    category: str
 
 
 @dataclass
@@ -59,15 +81,23 @@ class SignatureRecord:
 # ---------- Project scanning ----------
 
 def scan_project(repo: Path, max_files: int = 80,
-                 max_bytes_per_file: int = 4000) -> list[tuple[str, str]]:
+                 max_bytes_per_file: int = 4000,
+                 max_aggregate_bytes: int = MAX_SCAN_PAYLOAD_BYTES,
+                 ) -> list[tuple[str, str]]:
     """Recolecta archivos del repo (Python/TS/MD/configs) limitando tamaño.
 
     Uses os.walk + in-place dirname pruning so excluded trees (.venv,
     node_modules, .git) are never descended — vs the prior rglob which
     materialized every path in the repo, sorted, and only THEN excluded.
+
+    Stops early when the aggregate content size would exceed
+    `max_aggregate_bytes`, which prevents large repos from blowing the
+    downstream token budget.
     """
     import os
     files: list[tuple[str, str]] = []
+    aggregate_bytes = 0
+    capped = False
     for root, dirnames, fnames in os.walk(repo):
         dirnames[:] = [d for d in dirnames if d not in SCAN_EXCLUDE_DIRS]
         for fname in sorted(fnames):
@@ -76,11 +106,25 @@ def scan_project(repo: Path, max_files: int = 80,
                 continue
             try:
                 content = p.read_text(encoding="utf-8", errors="ignore")[:max_bytes_per_file]
+                if aggregate_bytes + len(content) > max_aggregate_bytes:
+                    capped = True
+                    metrics.record("scan", files=len(files),
+                                   aggregate_bytes=aggregate_bytes,
+                                   capped_by="aggregate")
+                    return files
                 files.append((str(p.relative_to(repo)), content))
+                aggregate_bytes += len(content)
                 if len(files) >= max_files:
+                    capped = True
+                    metrics.record("scan", files=len(files),
+                                   aggregate_bytes=aggregate_bytes,
+                                   capped_by="max_files")
                     return files
             except Exception:
                 continue
+    if not capped:
+        metrics.record("scan", files=len(files),
+                       aggregate_bytes=aggregate_bytes, capped_by=None)
     return files
 
 
@@ -114,10 +158,17 @@ def _score_file_for_sage(content: str, keywords: list[str]) -> int:
 def build_briefing(files: list[tuple[str, str]],
                    for_sage: Sage | None = None,
                    max_files_in_briefing: int = 25,
-                   max_chars_per_file: int = 1200) -> str:
+                   max_chars_per_file: int = 1200,
+                   max_aggregate_bytes: int = MAX_BRIEFING_PAYLOAD_BYTES,
+                   ) -> str:
     """Briefing en EN. Si `for_sage` se da y aparece en SAGE_KEYWORDS,
     los archivos se ranquean por densidad de keywords del eje del sabio
-    y se queda con los top N. Sin sage o sin keywords: slice alfabético."""
+    y se queda con los top N. Sin sage o sin keywords: slice alfabético.
+
+    Stops appending files once the assembled briefing would exceed
+    `max_aggregate_bytes`. With 9 sages × 25 files × 1200 chars the
+    worst-case payload was ~270KB per debate round; the cap bounds it.
+    """
     out: list[str] = ["# Project briefing", ""]
     keywords = SAGE_KEYWORDS.get(for_sage.id) if for_sage else None
     if for_sage and keywords:
@@ -133,12 +184,33 @@ def build_briefing(files: list[tuple[str, str]],
     else:
         selected = files[:max_files_in_briefing]
         out.append(f"## {len(files)} files scanned. Showing top {len(selected)}.")
+    aggregate_bytes = sum(len(line) + 1 for line in out)
+    files_included = 0
+    capped = False
     for path, content in selected:
-        out.append(f"\n### `{path}`")
-        out.append("```")
-        out.append(content[:max_chars_per_file])
-        out.append("```")
-    return "\n".join(out)
+        chunk = [
+            f"\n### `{path}`",
+            "```",
+            content[:max_chars_per_file],
+            "```",
+        ]
+        chunk_bytes = sum(len(line) + 1 for line in chunk)
+        if aggregate_bytes + chunk_bytes > max_aggregate_bytes:
+            capped = True
+            break
+        out.extend(chunk)
+        aggregate_bytes += chunk_bytes
+        files_included += 1
+    briefing = "\n".join(out)
+    metrics.record(
+        "briefing",
+        sage=for_sage.id if for_sage else None,
+        files_offered=len(selected),
+        files_included=files_included,
+        briefing_bytes=len(briefing),
+        capped=capped,
+    )
+    return briefing
 
 
 def render_sage_prompt(sage: Sage) -> str:
@@ -339,7 +411,11 @@ def _parse_model_json(text: str) -> dict:
 
 
 def _sanitize_proposal_dict(p: dict, sage_name: str, round_num: int) -> Proposal | None:
-    """Validate + clamp a model-produced proposal. Returns None if malformed."""
+    """Validate + clamp a model-produced proposal. Returns None if malformed.
+
+    Expected shape is `ProposalDict` (title, rationale, blast_radius,
+    files_touched, category). Anything missing or malformed → None.
+    """
     if not isinstance(p, dict):
         return None
     title = str(p.get("title", "")).strip()[:_PROPOSAL_TITLE_MAX]

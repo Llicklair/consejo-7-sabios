@@ -18,15 +18,111 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import random
 import re
 import shutil
 import subprocess
 import sys
+import time
 from dataclasses import asdict
 from pathlib import Path
 
+from . import metrics
 from .sages import ALL_SAGES, SAGES, Sage
+
+
+def _json_schema_enabled() -> bool:
+    """Whether to pass `--json-schema` to the claude CLI.
+
+    Default ON since claude 2.1.85 supports it natively. Set
+    `CONSEJO_USE_JSON_SCHEMA=0` to disable and fall back to free-form
+    output parsed by `_extract_json_object` (the Conservador's
+    belt-and-suspenders path — keep until truncation rate is measured
+    in a real-mode debate).
+    """
+    return os.environ.get("CONSEJO_USE_JSON_SCHEMA", "1") != "0"
+
+
+def _build_claude_args(
+    system_prompt: str,
+    repo: Path,
+    model: str,
+    schema: dict,
+    allowed_tools: str,
+) -> list[str]:
+    """Build the `claude -p` argv. Extracted from `_spawn_claude` so the
+    schema-injection behavior can be unit-tested without spawning."""
+    args = [
+        "claude", "-p",
+        "--output-format", "json",
+        "--system-prompt", system_prompt,
+        "--add-dir", str(repo),
+        "--model", model,
+        "--no-session-persistence",
+    ]
+    if _json_schema_enabled():
+        args += ["--json-schema", json.dumps(schema)]
+    if allowed_tools:
+        args += ["--allowedTools", allowed_tools]
+    else:
+        args += ["--tools", ""]
+    return args
+
+
+# ---------- Structured driver-boundary errors ----------
+
+class DriverError(Exception):
+    """Base class for errors raised at the Claude-CLI subprocess boundary.
+
+    Catching `DriverError` lets callers distinguish driver failures from
+    domain/logic errors without resorting to RuntimeError string matching.
+    """
+
+
+class DriverCLINotFoundError(DriverError):
+    def __init__(self) -> None:
+        super().__init__(
+            "`claude` CLI not found on PATH. Install Claude Code to use this mode."
+        )
+
+
+class DriverTimeoutError(DriverError):
+    def __init__(self, timeout_s: float) -> None:
+        self.timeout_s = timeout_s
+        super().__init__(f"claude CLI timed out after {timeout_s}s")
+
+
+class DriverProcessError(DriverError):
+    def __init__(self, returncode: int, stderr_head: str,
+                 stdout_head: str, stderr_len: int, stdout_len: int) -> None:
+        self.returncode = returncode
+        self.stderr_head = stderr_head
+        self.stdout_head = stdout_head
+        rc_signed = returncode - 2**32 if returncode > 2**31 else returncode
+        diag = (f"returncode={returncode} (signed={rc_signed}) "
+                f"stderr_len={stderr_len} stdout_len={stdout_len}")
+        super().__init__(
+            f"claude CLI failed: {diag}\n"
+            f"--stderr--\n{stderr_head}\n"
+            f"--stdout_head--\n{stdout_head}"
+        )
+
+
+class DriverInvalidResponseError(DriverError):
+    def __init__(self, response_head: str, kind: str = "wrapper") -> None:
+        self.response_head = response_head
+        self.kind = kind  # "wrapper" (CLI envelope) | "inner" (sage payload)
+        label = ("claude CLI returned non-JSON"
+                 if kind == "wrapper"
+                 else "sage returned non-JSON inner text")
+        super().__init__(f"{label}: {response_head}")
+
+
+class DriverEmptyResultError(DriverError):
+    def __init__(self, wrapper: dict) -> None:
+        self.wrapper = wrapper
+        super().__init__(f"claude CLI returned empty result: {wrapper}")
 
 
 def _extract_json_object(text: str) -> dict:
@@ -507,55 +603,69 @@ async def _spawn_claude(
     wrapper, then parse `result` as JSON (constrained by --json-schema).
     """
     if not claude_available():
-        raise RuntimeError(
-            "`claude` CLI not found on PATH. Install Claude Code to use this mode."
-        )
+        raise DriverCLINotFoundError()
 
-    args = [
-        "claude", "-p",
-        "--output-format", "json",
-        "--system-prompt", system_prompt,
-        "--add-dir", str(repo),
-        "--model", model,
-        "--no-session-persistence",
-    ]
-    if allowed_tools:
-        args += ["--allowedTools", allowed_tools]
-    else:
-        args += ["--tools", ""]
+    args = _build_claude_args(
+        system_prompt=system_prompt,
+        repo=repo,
+        model=model,
+        schema=schema,
+        allowed_tools=allowed_tools,
+    )
     proc = await asyncio.create_subprocess_exec(
         *args,
         stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
+    started = time.monotonic()
     try:
-        stdout, stderr = await asyncio.wait_for(
-            proc.communicate(input=user_msg.encode("utf-8")),
-            timeout=timeout_s,
-        )
-    except asyncio.TimeoutError:
+        async with asyncio.timeout(timeout_s):
+            stdout, stderr = await proc.communicate(input=user_msg.encode("utf-8"))
+    except TimeoutError:
         proc.kill()
-        raise RuntimeError(f"claude CLI timed out after {timeout_s}s")
+        await proc.wait()
+        metrics.record(
+            "subprocess",
+            duration_s=round(time.monotonic() - started, 3),
+            timed_out=True,
+            timeout_s=timeout_s,
+            user_msg_bytes=len(user_msg.encode("utf-8")),
+            system_prompt_bytes=len(system_prompt.encode("utf-8")),
+            retry_attempt=retry_attempt,
+        )
+        raise DriverTimeoutError(timeout_s=timeout_s) from None
+
+    metrics.record(
+        "subprocess",
+        duration_s=round(time.monotonic() - started, 3),
+        timed_out=False,
+        returncode=proc.returncode,
+        stdout_bytes=len(stdout),
+        stderr_bytes=len(stderr),
+        user_msg_bytes=len(user_msg.encode("utf-8")),
+        system_prompt_bytes=len(system_prompt.encode("utf-8")),
+        retry_attempt=retry_attempt,
+    )
 
     if proc.returncode != 0:
         err = stderr.decode("utf-8", errors="replace")[:2000]
-        rc = proc.returncode
-        rc_signed = rc - 2**32 if rc > 2**31 else rc
-        diag = (
-            f"returncode={rc} (signed={rc_signed}) "
-            f"stderr_len={len(stderr)} stdout_len={len(stdout)}"
-        )
         head = stdout[:500].decode("utf-8", errors="replace")
-        raise RuntimeError(
-            f"claude CLI failed: {diag}\n--stderr--\n{err}\n--stdout_head--\n{head}"
+        raise DriverProcessError(
+            returncode=proc.returncode,
+            stderr_head=err,
+            stdout_head=head,
+            stderr_len=len(stderr),
+            stdout_len=len(stdout),
         )
 
     out = stdout.decode("utf-8", errors="replace")
     try:
         wrapper = json.loads(out)
     except json.JSONDecodeError as e:
-        raise RuntimeError(f"claude CLI returned non-JSON: {out[:500]}") from e
+        raise DriverInvalidResponseError(
+            response_head=out[:500], kind="wrapper",
+        ) from e
 
     inner_text = wrapper.get("result", "")
     if not inner_text:
@@ -587,13 +697,13 @@ async def _spawn_claude(
                 timeout_s=timeout_s,
                 retry_attempt=1,
             )
-        raise RuntimeError(f"claude CLI returned empty result: {wrapper}")
+        raise DriverEmptyResultError(wrapper=wrapper)
 
     try:
         return _extract_json_object(inner_text)
     except json.JSONDecodeError as e:
-        raise RuntimeError(
-            f"sage returned non-JSON inner text: {inner_text[:500]}"
+        raise DriverInvalidResponseError(
+            response_head=inner_text[:500], kind="inner",
         ) from e
 
 
@@ -779,6 +889,17 @@ TURN_SCHEMA = {
                             "new_title": {"type": "string"},
                             "new_rationale": {"type": "string"},
                             "new_blast_radius": {"enum": ["SAFE", "MEDIUM", "RISKY"]},
+                            "new_files_touched": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": (
+                                    "Replace the item's files_touched array "
+                                    "entirely. Use this to fix incorrect or "
+                                    "missing file references — otherwise the "
+                                    "item becomes an 'immortal cockroach' that "
+                                    "no amount of debate can correct."
+                                ),
+                            },
                         },
                     },
                 },
@@ -826,8 +947,9 @@ def _consensus_system_prompt(sage: Sage) -> str:
         f"things they said. Keep it under 6 sentences. This is the visible debate.\n\n"
         f"2. **plan_diff** — concrete changes to the plan: `add` new items "
         f"from YOUR axis, `amend` existing ones (rewrite a rationale to address "
-        f"your objection, narrow scope, change blast_radius), `remove` items "
-        f"that shouldn't be there.\n\n"
+        f"your objection, narrow scope, change blast_radius, or replace the "
+        f"`files_touched` array via `new_files_touched` when the file references "
+        f"are wrong or incomplete), `remove` items that shouldn't be there.\n\n"
         f"3. **vote** — `signed: true` ONLY when (a) the plan reflects YOUR "
         f"axis with at least one item you proposed or amended, AND (b) you can "
         f"endorse every other item. Otherwise `signed: false` with `objections` "
@@ -929,6 +1051,8 @@ def _apply_plan_diff(plan: list[dict], diff: dict) -> list[dict]:
             item["rationale"] = amend["new_rationale"]
         if "new_blast_radius" in amend:
             item["blast_radius"] = amend["new_blast_radius"]
+        if "new_files_touched" in amend:
+            item["files_touched"] = list(amend["new_files_touched"])
     for rm in diff.get("remove", []) or []:
         if rm in titles:
             out = [p for p in out if p.get("title") != rm]

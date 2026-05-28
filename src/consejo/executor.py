@@ -107,12 +107,12 @@ async def _git(repo: Path, *args: str, check: bool = True) -> str:
         stderr=asyncio.subprocess.PIPE,
     )
     try:
-        stdout, stderr = await asyncio.wait_for(
-            proc.communicate(), timeout=_GIT_TIMEOUT_S
-        )
-    except asyncio.TimeoutError:
+        async with asyncio.timeout(_GIT_TIMEOUT_S):
+            stdout, stderr = await proc.communicate()
+    except TimeoutError:
         proc.kill()
-        raise RuntimeError(f"git {' '.join(args[:2])} timed out")
+        await proc.wait()
+        raise RuntimeError(f"git {' '.join(args[:2])} timed out") from None
     if check and proc.returncode != 0:
         err = (stderr or b"").decode("utf-8", errors="replace")[:500]
         raise RuntimeError(f"git failed (exit {proc.returncode}): {err}")
