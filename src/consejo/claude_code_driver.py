@@ -50,6 +50,7 @@ def _build_claude_args(
     model: str,
     schema: dict,
     allowed_tools: str,
+    disable_schema: bool = False,
 ) -> list[str]:
     """Build the `claude -p` argv. Extracted from `_spawn_claude` so the
     schema-injection behavior can be unit-tested without spawning."""
@@ -61,7 +62,7 @@ def _build_claude_args(
         "--model", model,
         "--no-session-persistence",
     ]
-    if _json_schema_enabled():
+    if _json_schema_enabled() and not disable_schema:
         args += ["--json-schema", json.dumps(schema)]
     if allowed_tools:
         args += ["--allowedTools", allowed_tools]
@@ -595,6 +596,7 @@ async def _spawn_claude(
     allowed_tools: str = "Read,Glob,Grep",
     timeout_s: float = 300.0,
     retry_attempt: int = 0,
+    disable_schema: bool = False,
 ) -> dict:
     """Spawn a `claude -p` subprocess and return the parsed inner JSON.
 
@@ -611,6 +613,7 @@ async def _spawn_claude(
         model=model,
         schema=schema,
         allowed_tools=allowed_tools,
+        disable_schema=disable_schema,
     )
     proc = await asyncio.create_subprocess_exec(
         *args,
@@ -673,21 +676,29 @@ async def _spawn_claude(
             turns = wrapper.get("num_turns")
             dur = wrapper.get("duration_ms")
             cost = wrapper.get("total_cost_usd", 0.0)
+            # The retry also drops --json-schema. Empirically, strict schema
+            # validation in `claude -p` swallows the model's output as empty
+            # string when it doesn't pass validation (opus emits valid-looking
+            # JSON of 700-900 tokens but the wrapper.result still comes back
+            # ''). Without --json-schema the model emits free text and
+            # `_extract_json_object` parses out the JSON heuristically.
             print(
                 f"[empty-result-retry] turns={turns} duration={dur}ms "
-                f"cost=${cost:.3f}; retrying with tools disabled",
+                f"cost=${cost:.3f}; retrying without tools and without schema",
                 file=sys.stderr,
             )
+            schema_hint = json.dumps(schema, indent=2)
             return await _spawn_claude(
                 user_msg=(
                     f"{user_msg}\n\n"
                     f"## URGENT: previous attempt failed\n"
                     f"Your previous response was an empty string after "
-                    f"{turns} turns of exploration. You may NOT use tools this "
-                    f"time — emit the JSON directly based on what you can infer "
-                    f"from the schema and the atasco. If you genuinely cannot "
-                    f"produce concrete proposals, return the minimal valid "
-                    f"object that matches the schema (e.g. with an empty list)."
+                    f"{turns} turns. You may NOT use tools this time — emit "
+                    f"the JSON object **directly as your final message** "
+                    f"(no preamble, no markdown fences). It must match this "
+                    f"schema:\n```json\n{schema_hint}\n```\n"
+                    f"If you genuinely have nothing to propose, return the "
+                    f"minimal valid object (empty arrays for list fields)."
                 ),
                 system_prompt=system_prompt,
                 schema=schema,
@@ -696,6 +707,7 @@ async def _spawn_claude(
                 allowed_tools="",
                 timeout_s=timeout_s,
                 retry_attempt=1,
+                disable_schema=True,
             )
         raise DriverEmptyResultError(wrapper=wrapper)
 
@@ -1112,6 +1124,7 @@ async def consensus_dialogue(
         rounds_used = r
         round_order = list(sages)
         rng.shuffle(round_order)
+        failed_in_round = 0
         for i, sage in enumerate(round_order, start=1):
             turn_counter += 1
             user_msg = _consensus_turn_user_message(
@@ -1135,6 +1148,7 @@ async def consensus_dialogue(
                     f"{str(e)[:400]}",
                     file=sys.stderr,
                 )
+                failed_in_round += 1
                 turn_out = {
                     "message": "(turn failed — abstaining this round)",
                     "plan_diff": {},
@@ -1177,6 +1191,17 @@ async def consensus_dialogue(
             )
             if on_turn:
                 await on_turn(sage, turn_counter, r, entry, plan, votes)
+
+        if failed_in_round == len(round_order):
+            raise RuntimeError(
+                f"Catastrophic round failure: all {failed_in_round} sage(s) "
+                f"failed in round {r}. Aborting consensus to avoid runaway "
+                f"cost. Check the [sage-fail] / [empty-result-retry] messages "
+                f"above. Likely causes: orphan claude.exe / node processes "
+                f"holding memory, claude CLI version mismatch, or "
+                f"--json-schema rejecting the model output (try --cc-model "
+                f"sonnet)."
+            )
 
         if r >= min_rounds and _is_unanimous(plan, votes, sage_ids):
             converged_at_round = r
