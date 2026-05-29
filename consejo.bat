@@ -1,15 +1,11 @@
 @echo off
 chcp 65001 >nul
 cd /d "%~dp0"
-set PYTHONPATH=src
 
 if not exist ".venv\Scripts\python.exe" (
     echo.
     echo [ERROR] No encuentro .venv\Scripts\python.exe
-    echo.
-    echo Crea el venv primero:
-    echo     python -m venv .venv
-    echo     .venv\Scripts\pip install -e .
+    echo Crea el venv:  python -m venv .venv  ^&^&  .venv\Scripts\pip install -e .
     echo.
     pause
     exit /b 1
@@ -18,23 +14,18 @@ if not exist ".venv\Scripts\python.exe" (
 echo.
 echo  Convocando al Consejo de los 7 Sabios
 echo  -------------------------------------
-echo  Tema:    Como mejoramos este proyecto?
-echo  Modo:    claude-code . consenso . opus . headless (--no-ui)
-echo  Rondas:  min 5, max 8 (duracion esperada ~30-60 min)
-echo  Schema:  OFF (los sabios leen el repo de verdad)
-echo  En vivo: se abre otra ventana con el debate formateado (sin parpadeo)
+echo  Se abren DOS ventanas: el debate (animado) y el watcher en vivo.
 echo.
 
-REM Abre una ventana aparte que sigue el debate en vivo (espera al .jsonl)
+REM Ventana del watcher: sigue el debate formateado, turno a turno.
 start "Consejo - debate en vivo" cmd /c "%~dp0watch-debate.bat"
 
-REM --no-ui: sin animacion TUI (parpadeaba en cmd). La vista en vivo la da
-REM la ventana del watcher; aqui solo logs de estado. El plan va al reporte.
-.venv\Scripts\python.exe -m consejo.cli "¿Cómo mejoramos este proyecto?" --mode claude-code --consensus --consensus-rounds 8 --consensus-min-rounds 5 --cc-model opus --no-ui
-
-echo.
-echo  Consejo finalizado. El plan esta en consejo-report-*.md (este directorio).
-dir /b /o-d consejo-report-*.md 2>nul
-echo.
-echo  Pulsa una tecla para cerrar.
-pause >nul
+REM El debate (con animacion) corre en Windows Terminal -> render fluido,
+REM sin el parpadeo del cmd.exe legacy. Si no esta wt.exe, cae a cmd normal.
+where wt.exe >nul 2>nul
+if %errorlevel%==0 (
+    wt.exe -d "%~dp0" --title "Consejo" cmd /k "%~dp0_run-debate.bat"
+) else (
+    echo  [aviso] Windows Terminal no encontrado: uso cmd (la animacion parpadea).
+    start "Consejo - debate" cmd /k "%~dp0_run-debate.bat"
+)
