@@ -28,7 +28,7 @@ from typing import TypedDict
 
 from .backends import build_backend
 from .driver_protocol import set_driver
-from .sages import ALL_SAGES, DEBATE_SAGES, SAGES, Sage
+from .sages import DEBATE_SAGES, SAGES, Sage
 from .states import MAX_DEBATE_ROUNDS, EventBus, State, StateEvent
 from .translator import translate_atasco_to_en, translate_plan_to_es
 
@@ -891,7 +891,7 @@ def render_plan_markdown(plan: dict, execution: dict | None = None) -> str:
             for ff in future_features:
                 horizon = ff.get("horizon", "next-quarter")
                 title = ff.get("title", "?")
-                why = ff.get("why", "")
+                why = ff.get("rationale") or ff.get("why", "")
                 sages = ", ".join(ff.get("supporting_sages") or [])
                 lines.append(f"| `{horizon}` | **{title}** | {why} | {sages} |")
             lines.append("")
