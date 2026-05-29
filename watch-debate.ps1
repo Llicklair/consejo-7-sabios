@@ -7,12 +7,18 @@ $ErrorActionPreference = "Stop"
 $OutputEncoding = [System.Text.Encoding]::UTF8
 
 $pattern = Join-Path $PSScriptRoot "consejo-debate-*.jsonl"
+$start = Get-Date
 $file = $null
 $waited = 0
 while (-not $file) {
-    $file = Get-ChildItem -Path $pattern -ErrorAction SilentlyContinue |
+    $cand = Get-ChildItem -Path $pattern -ErrorAction SilentlyContinue |
         Sort-Object LastWriteTime | Select-Object -Last 1
-    if ($file) { break }
+    # Solo engancha a un debate FRESCO o ACTIVO (escrito en los últimos 2 min).
+    # Así ignora .jsonl viejos de runs anteriores en vez de mostrar el debate
+    # equivocado mientras el nuevo aún no ha escrito su cabecera.
+    if ($cand -and $cand.LastWriteTime -gt $start.AddSeconds(-120)) {
+        $file = $cand; break
+    }
     if ($waited -eq 0) {
         Write-Host "Esperando a que arranque el debate (consejo-debate-*.jsonl)..." -ForegroundColor Yellow
     }

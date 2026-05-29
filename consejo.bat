@@ -19,16 +19,18 @@ echo.
 echo  Convocando al Consejo de los 7 Sabios
 echo  -------------------------------------
 echo  Tema:    Como mejoramos este proyecto?
-echo  Modo:    claude-code . consenso . opus
+echo  Modo:    claude-code . consenso . opus . headless (--no-ui)
 echo  Rondas:  min 5, max 8 (duracion esperada ~30-60 min)
 echo  Schema:  OFF (los sabios leen el repo de verdad)
-echo  En vivo: se abre otra ventana con el debate formateado
+echo  En vivo: se abre otra ventana con el debate formateado (sin parpadeo)
 echo.
 
 REM Abre una ventana aparte que sigue el debate en vivo (espera al .jsonl)
 start "Consejo - debate en vivo" cmd /c "%~dp0watch-debate.bat"
 
-.venv\Scripts\python.exe -m consejo.cli "¿Cómo mejoramos este proyecto?" --mode claude-code --consensus --consensus-rounds 8 --consensus-min-rounds 5 --cc-model opus --speed 0.3
+REM --no-ui: sin animacion TUI (parpadeaba en cmd). La vista en vivo la da
+REM la ventana del watcher; aqui solo logs de estado. El plan va al reporte.
+.venv\Scripts\python.exe -m consejo.cli "¿Cómo mejoramos este proyecto?" --mode claude-code --consensus --consensus-rounds 8 --consensus-min-rounds 5 --cc-model opus --no-ui
 
 echo.
 echo  Consejo finalizado. El plan esta en consejo-report-*.md (este directorio).
