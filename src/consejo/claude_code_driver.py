@@ -51,10 +51,16 @@ from .schemas import CRITIQUE_SCHEMA, JUDGE_SCHEMA, PROPOSAL_SCHEMA
 def _json_schema_enabled() -> bool:
     """Whether to pass `--json-schema` to the claude CLI.
 
-    Default ON since claude 2.1.85 supports it natively. Set
-    `CONSEJO_USE_JSON_SCHEMA=0` to disable.
+    Default OFF. On claude 2.1.85 the strict `--json-schema` validation
+    swallowed *every* opus turn as an empty `result` (100% empty-result
+    retries in a real consensus debate), which doubled cost and — worse —
+    stripped repo tools (Read/Glob/Grep) from the regenerated answer, so the
+    debate ran without code grounding. The heuristic `_extract_json_object`
+    fallback parses the free-text output reliably and keeps tools on the
+    primary call. Set `CONSEJO_USE_JSON_SCHEMA=1` to opt back in if a future
+    CLI fixes the validation behavior.
     """
-    return os.environ.get("CONSEJO_USE_JSON_SCHEMA", "1") != "0"
+    return os.environ.get("CONSEJO_USE_JSON_SCHEMA") == "1"
 
 
 def _build_claude_args(

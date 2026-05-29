@@ -1,10 +1,10 @@
-"""Regression tests for item 7 of the 20260527-183832 council plan.
+"""Regression tests for the `--json-schema` opt-in flag.
 
-The driver should pass `--json-schema <schema>` to the claude CLI by default
-(structured output, constrains the model to schema-valid JSON) but allow
-disabling via `CONSEJO_USE_JSON_SCHEMA=0` so the Conservador's belt-and-
-suspenders fallback (`_extract_json_object`) remains reachable until the
-truncation rate of --json-schema is measured in a real-mode debate.
+The driver does NOT pass `--json-schema` by default: on claude 2.1.85 strict
+validation swallowed every opus turn as an empty result (measured: 100%
+empty-result retries in a real consensus debate), doubling cost and stripping
+repo tools from the regenerated answer. The heuristic `_extract_json_object`
+fallback is the default path. `CONSEJO_USE_JSON_SCHEMA=1` opts back in.
 """
 
 from __future__ import annotations
@@ -22,27 +22,30 @@ from consejo.json_utils import _extract_json_object
 from consejo.schemas import PROPOSAL_SCHEMA
 
 
-def test_json_schema_enabled_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_json_schema_disabled_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("CONSEJO_USE_JSON_SCHEMA", raising=False)
-    assert _json_schema_enabled() is True
-
-
-def test_json_schema_can_be_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("CONSEJO_USE_JSON_SCHEMA", "0")
     assert _json_schema_enabled() is False
 
 
-def test_json_schema_enabled_for_any_non_zero(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_json_schema_can_be_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("CONSEJO_USE_JSON_SCHEMA", "1")
     assert _json_schema_enabled() is True
+
+
+def test_json_schema_enabled_only_for_explicit_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Opt-in is strict: only "1" enables it. Anything else stays off.
+    monkeypatch.setenv("CONSEJO_USE_JSON_SCHEMA", "0")
+    assert _json_schema_enabled() is False
     monkeypatch.setenv("CONSEJO_USE_JSON_SCHEMA", "true")
-    assert _json_schema_enabled() is True
+    assert _json_schema_enabled() is False
 
 
 def test_args_include_serialized_schema_when_enabled(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.delenv("CONSEJO_USE_JSON_SCHEMA", raising=False)
+    monkeypatch.setenv("CONSEJO_USE_JSON_SCHEMA", "1")
     args = _build_claude_args(
         system_prompt="you are the architect",
         repo=Path("/tmp/repo"),
