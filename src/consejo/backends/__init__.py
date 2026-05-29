@@ -4,7 +4,7 @@ Each backend implements `consejo.driver_protocol.SageDriver` and
 encapsulates the subprocess CLI quirks of a specific vendor.
 """
 
-from .claude_code import ClaudeCodeBackend
+from ..claude_code_driver import ClaudeCodeBackend
 from .codex import CodexBackend
 
 __all__ = ["ClaudeCodeBackend", "CodexBackend"]

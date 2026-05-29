@@ -383,3 +383,39 @@ async def judge_synthesis(
     )
     inner["atasco"] = atasco
     inner["rounds_used"] = rounds_used
+    return inner
+
+
+class ClaudeCodeBackend:
+    """SageDriver respaldado por el flujo `claude -p` de este módulo.
+
+    Colapsado desde el antiguo `backends/claude_code.py` (adaptador fino): el
+    backend vive ahora junto a su implementación (`_spawn_claude` /
+    `claude_available`), sin la indirección entre módulos.
+    """
+
+    name = "claude-code"
+
+    def available(self) -> bool:
+        return claude_available()
+
+    async def spawn(
+        self,
+        *,
+        user_msg: str,
+        system_prompt: str,
+        schema: dict,
+        repo: Path,
+        model: str,
+        allowed_tools: str = "Read,Glob,Grep",
+        timeout_s: float = 300.0,
+    ) -> dict:
+        return await _spawn_claude(
+            user_msg=user_msg,
+            system_prompt=system_prompt,
+            schema=schema,
+            repo=repo,
+            model=model,
+            allowed_tools=allowed_tools,
+            timeout_s=timeout_s,
+        )
