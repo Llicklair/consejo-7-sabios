@@ -24,7 +24,7 @@ REM El debate (con animacion) corre en Windows Terminal -> render fluido,
 REM sin el parpadeo del cmd.exe legacy. Si no esta wt.exe, cae a cmd normal.
 where wt.exe >nul 2>nul
 if %errorlevel%==0 (
-    wt.exe -d "%~dp0" --title "Consejo" cmd /k "%~dp0_run-debate.bat"
+    wt.exe --title "Consejo" cmd /k "%~dp0_run-debate.bat"
 ) else (
     echo  [aviso] Windows Terminal no encontrado: uso cmd (la animacion parpadea).
     start "Consejo - debate" cmd /k "%~dp0_run-debate.bat"
