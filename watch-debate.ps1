@@ -6,7 +6,7 @@
 $ErrorActionPreference = "Stop"
 $OutputEncoding = [System.Text.Encoding]::UTF8
 
-$pattern = Join-Path $PSScriptRoot "consejo-debate-*.jsonl"
+$pattern = Join-Path (Get-Location).Path "consejo-debate-*.jsonl"
 $start = Get-Date
 $file = $null
 $waited = 0

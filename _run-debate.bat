@@ -1,12 +1,14 @@
 @echo off
 chcp 65001 >nul
-cd /d "%~dp0"
+REM Corre el debate sobre el repo = directorio ACTUAL (lo fija wt -d "%REPO%").
+REM Usa el python/consejo del TOOL (%~dp0), no del repo debatido.
+set "PYTHONPATH=%~dp0src"
 
-echo  Consejo en curso (opus, consenso, rondas 5-8). Cierra para abortar.
-echo  El plan final ira a consejo-report-*.md
+echo  Consejo en curso sobre: %CD%
+echo  El plan ira a consejo-report-*.md (en esta carpeta). Cierra para abortar.
 echo.
 
-.venv\Scripts\python.exe -m consejo.cli "¿Cómo mejoramos este proyecto?" --mode claude-code --consensus --consensus-rounds 8 --consensus-min-rounds 5 --cc-model opus --speed 0.3
+"%~dp0.venv\Scripts\python.exe" -m consejo.cli "¿Cómo mejoramos este proyecto?" --repo "%CD%" --mode claude-code --consensus --consensus-rounds 8 --consensus-min-rounds 5 --cc-model opus --speed 0.3
 
 echo.
 echo  Consejo finalizado. Plan:
