@@ -597,7 +597,11 @@ async def animate(speed: float = 1.0, scale: int = 1,
 
     async def consume() -> None:
         async for event in bus.consume():
-            if event.state == State.REPORTE and "report_path" not in current:
+            # Solo en modo demo (mock_driver) fabricamos un reporte fake. En
+            # modo real (driver = run_council) el CLI escribe el reporte de
+            # verdad tras converger; un fake aquí lo duplicaba y confundía.
+            if (event.state == State.REPORTE and "report_path" not in current
+                    and driver is None):
                 current["report_path"] = generate_fake_report()
             current["state"] = event.state
             current["t0"] = time.monotonic()
