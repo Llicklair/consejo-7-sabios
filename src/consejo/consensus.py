@@ -344,5 +344,8 @@ async def post_consensus_vision(
         repo=Path.cwd(),
         model=model,
         allowed_tools="",
+        # La visión solo redacta (sin tools); 120s sobra. El default de 300s
+        # colgaba el pipeline 5 min cuando la llamada se atascaba.
+        timeout_s=120.0,
     )
     return inner

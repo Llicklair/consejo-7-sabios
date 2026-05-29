@@ -610,6 +610,13 @@ async def run_council(atasco: str, repo: Path, bus: EventBus,
                 plan["strategic_vision"] = vision
             except Exception as e:
                 print(f"[vision-fail] {str(e)[:400]}", file=sys.stderr)
+                plan["strategic_vision"] = {
+                    "headline": (
+                        f"⚠️ Visión estratégica no generada "
+                        f"({type(e).__name__}). El plan táctico es válido; "
+                        f"reintenta el consejo para obtener la visión."
+                    ),
+                }
         await asyncio.sleep(1.0 / speed)
         await emit(State.ACUERDO)
         await asyncio.sleep(2.0 / speed)
@@ -862,7 +869,12 @@ def render_plan_markdown(plan: dict, execution: dict | None = None) -> str:
     vision = plan.get("strategic_vision")
     if isinstance(vision, dict) and vision:
         lines += ["", "## 🔭 Visión estratégica", ""]
-        if vision.get("headline"):
+        # El placeholder que deja consensus_dialogue si la visión nunca se
+        # computó: muéstralo como nota honesta, no como un headline real.
+        if "computed separately" in (vision.get("headline") or ""):
+            lines += ["_Visión no generada en esta sesión "
+                      "(el paso post-consenso no llegó a ejecutarse)._", ""]
+        elif vision.get("headline"):
             lines.append(f"**{vision['headline']}**")
             lines.append("")
         if vision.get("where_to_take_it"):
