@@ -14,6 +14,30 @@ from enum import StrEnum
 
 
 class State(StrEnum):
+    """Fases del ciclo de un consejo, emitidas como `StateEvent` en el bus.
+
+    Forma del `payload` (dict del StateEvent) por estado:
+
+    - ``ENTRANDO`` / ``SENTANDOSE`` / ``ANALIZANDO``: ``{}`` — sin payload
+      (beats puros de animación).
+    - ``DEBATE``: snapshot de voto/orador del turno. Siempre incluye::
+
+          signed_this_round: list[int]  # asientos que firmaron en este turno/ronda
+          total_signed:      list[int]  # todos los asientos firmados ahora mismo
+
+      En modo consenso añade además::
+
+          turn: int            # nº de turno global
+          speaker: str         # sage_id del que habla
+          speaker_idx: int     # asiento del orador (-1 si es voice-only/off-table)
+          plan_size: int       # nº de items en el plan actual
+          voice_only: bool      # True si el orador no ocupa asiento
+
+      ``round_num`` del StateEvent es la ronda 1..N (solo significativo aquí).
+    - ``JUEZ`` / ``ACUERDO`` / ``LEVANTANDOSE`` / ``SALIENDO``: ``{}`` — sin payload.
+    - ``REPORTE``: ``{"plan": dict}`` — el plan final (forma que consume
+      ``render_plan_markdown``); en modo demo puede traer ``report_path``.
+    """
     ENTRANDO = "entrando"
     SENTANDOSE = "sentandose"
     ANALIZANDO = "analizando"
@@ -27,6 +51,11 @@ class State(StrEnum):
 
 @dataclass(frozen=True)
 class StateEvent:
+    """Una transición de estado en el bus de animación.
+
+    `payload` depende del estado — ver `State` para la forma que lleva cada uno.
+    `round_num` solo es significativo en DEBATE (1..N); 0 en el resto.
+    """
     state: State
     round_num: int = 0          # significativo sólo en DEBATE (1..N)
     sage_id: str | None = None
