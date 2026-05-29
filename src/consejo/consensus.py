@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import random
 import sys
+from datetime import datetime
 from pathlib import Path
 
 from .council_prompts import (
@@ -102,6 +103,25 @@ async def consensus_dialogue(
     # texture even when the headline says "unánime".
     dissent_history: dict[str, set[str]] = {}
 
+    # Live debate log: append each turn as JSONL so the run can be followed in
+    # real time from another terminal — e.g. `Get-Content <file> -Wait` (Win)
+    # or `tail -f <file>`. The full transcript still goes to the final report;
+    # this is just a live tap. Write failures never interrupt the debate.
+    live_log: Path | None = (
+        Path.cwd() / f"consejo-debate-{datetime.now():%Y%m%d-%H%M%S}.jsonl"
+    )
+    try:
+        with live_log.open("w", encoding="utf-8") as fh:
+            fh.write(json.dumps(
+                {"kind": "header", "atasco": atasco,
+                 "sages": sage_ids, "max_rounds": max_rounds,
+                 "min_rounds": min_rounds},
+                ensure_ascii=False,
+            ) + "\n")
+        print(f"[debate-log] {live_log}", file=sys.stderr)
+    except OSError:
+        live_log = None
+
     for r in range(1, max_rounds + 1):
         rounds_used = r
         round_order = list(sages)
@@ -165,6 +185,12 @@ async def consensus_dialogue(
                 "vote": vote,
             }
             transcript.append(entry)
+            if live_log is not None:
+                try:
+                    with live_log.open("a", encoding="utf-8") as fh:
+                        fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
+                except OSError:
+                    pass
             print(
                 f"[turn {turn_counter:>3} · r{r} · {sage.id:>14}] "
                 f"{'SIGN' if vote.get('signed') else 'BLOCK'} "
