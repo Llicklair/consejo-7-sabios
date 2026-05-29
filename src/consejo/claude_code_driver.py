@@ -243,11 +243,24 @@ async def _spawn_claude(
         raise DriverEmptyResultError(wrapper=wrapper)
 
     try:
-        return _extract_json_object(inner_text)
+        result_obj = _extract_json_object(inner_text)
     except json.JSONDecodeError as e:
         raise DriverInvalidResponseError(
             response_head=inner_text[:500], kind="inner",
         ) from e
+    # Surface per-call metrics (tokens/latency/cost) from the CLI wrapper so
+    # callers can log them to the JSONL stream. Reserved `_meta` key — callers
+    # read their own fields (proposals/vote/...) and ignore this.
+    if isinstance(result_obj, dict):
+        usage = wrapper.get("usage") or {}
+        result_obj["_meta"] = {
+            "duration_ms": wrapper.get("duration_ms"),
+            "cost_usd": wrapper.get("total_cost_usd"),
+            "input_tokens": usage.get("input_tokens"),
+            "output_tokens": usage.get("output_tokens"),
+            "model": model,
+        }
+    return result_obj
 
 
 _SPAWN_SEM = asyncio.Semaphore(3)

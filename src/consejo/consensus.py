@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import random
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -134,6 +135,8 @@ async def consensus_dialogue(
         round_order = list(sages)
         rng.shuffle(round_order)
         failed_in_round = 0
+        round_output_tokens = 0
+        round_secs = 0.0
         for i, sage in enumerate(round_order, start=1):
             turn_counter += 1
             user_msg = _consensus_turn_user_message(
@@ -141,6 +144,7 @@ async def consensus_dialogue(
                 round_num=r, max_rounds=max_rounds,
                 turn_in_round=i, total_sages=len(sages),
             )
+            _t0 = time.monotonic()
             try:
                 turn_out = await driver.spawn(
                     user_msg=user_msg,
@@ -167,6 +171,11 @@ async def consensus_dialogue(
                         "reasoning": "turn failed",
                     },
                 }
+            turn_secs = round(time.monotonic() - _t0, 2)
+            _meta = turn_out.get("_meta") or {}
+            round_secs += turn_secs
+            if _meta.get("output_tokens"):
+                round_output_tokens += _meta["output_tokens"]
 
             diff = turn_out.get("plan_diff") or {}
             if (diff.get("add") or diff.get("amend")):
@@ -190,6 +199,12 @@ async def consensus_dialogue(
                 "sage_id": sage.id,
                 "message": turn_out.get("message", ""),
                 "vote": vote,
+                "metrics": {
+                    "duration_s": turn_secs,
+                    "input_tokens": _meta.get("input_tokens"),
+                    "output_tokens": _meta.get("output_tokens"),
+                    "cost_usd": _meta.get("cost_usd"),
+                },
             }
             transcript.append(entry)
             if live_log is not None:
@@ -220,6 +235,8 @@ async def consensus_dialogue(
                         "failed": failed_in_round,
                         "total": len(round_order),
                         "quorum": quorum,
+                        "output_tokens": round_output_tokens,
+                        "duration_s": round(round_secs, 1),
                     }, ensure_ascii=False) + "\n")
             except OSError:
                 pass
