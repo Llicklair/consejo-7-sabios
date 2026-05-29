@@ -207,15 +207,39 @@ async def consensus_dialogue(
             if on_turn:
                 await on_turn(sage, turn_counter, r, entry, plan, votes)
 
-        if failed_in_round == len(round_order):
+        # --- fin de ronda: observabilidad + quorum ---
+        succeeded_in_round = len(round_order) - failed_in_round
+        quorum = len(sage_ids) // 2 + 1  # mayoría estricta
+        if live_log is not None:
+            try:
+                with live_log.open("a", encoding="utf-8") as fh:
+                    fh.write(json.dumps({
+                        "kind": "round_summary",
+                        "round": r,
+                        "succeeded": succeeded_in_round,
+                        "failed": failed_in_round,
+                        "total": len(round_order),
+                        "quorum": quorum,
+                    }, ensure_ascii=False) + "\n")
+            except OSError:
+                pass
+        print(
+            f"[round {r}] succeeded={succeeded_in_round}/{len(round_order)} "
+            f"failed={failed_in_round} quorum={quorum}",
+            file=sys.stderr,
+        )
+        # Quorum: si la MAYORÍA de sabios falló, el consenso de esta ronda sería
+        # de una minoría. Abortar en vez de (a) etiquetar como unánime un
+        # acuerdo degradado o (b) quemar coste hasta max_rounds sin posibilidad
+        # real de converger. Subsume el caso "todos fallaron" (succeeded=0).
+        if succeeded_in_round < quorum:
             raise RuntimeError(
-                f"Catastrophic round failure: all {failed_in_round} sage(s) "
-                f"failed in round {r}. Aborting consensus to avoid runaway "
-                f"cost. Check the [sage-fail] / [empty-result-retry] messages "
-                f"above. Likely causes: orphan claude.exe / node processes "
-                f"holding memory, claude CLI version mismatch, or "
-                f"--json-schema rejecting the model output (try --cc-model "
-                f"sonnet)."
+                f"Quorum no alcanzado en la ronda {r}: solo "
+                f"{succeeded_in_round}/{len(round_order)} sabios respondieron "
+                f"(quorum={quorum}). Abortando para no construir consenso sobre "
+                f"una minoría. Causas probables: procesos claude/node huérfanos "
+                f"agotando memoria, versión del CLI, o timeouts. Revisa "
+                f"[sage-fail]/[empty-result-retry] arriba."
             )
 
         if r >= min_rounds and _is_unanimous(plan, votes, sage_ids):
