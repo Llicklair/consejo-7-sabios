@@ -8,7 +8,7 @@ echo  Consejo en curso sobre: %CD%
 echo  El plan ira a consejo-report-*.md (en esta carpeta). Cierra para abortar.
 echo.
 
-"%~dp0.venv\Scripts\python.exe" -m consejo.cli "¿Cómo mejoramos este proyecto?" --repo "%CD%" --mode claude-code --consensus --consensus-rounds 8 --consensus-min-rounds 5 --cc-model opus --speed 0.3
+"%~dp0.venv\Scripts\python.exe" -m consejo.cli "¿Cómo mejoramos este proyecto?" --repo "%CD%" --mode claude-code --consensus --consensus-rounds 10 --consensus-min-rounds 8 --cc-model opus --speed 0.3
 
 echo.
 echo  Consejo finalizado. Plan:
