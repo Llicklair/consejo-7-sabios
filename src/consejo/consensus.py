@@ -38,12 +38,16 @@ def _apply_plan_diff(plan: list[dict], diff: dict) -> list[dict]:
         target = amend.get("target_title")
         if target not in titles:
             continue
-        item = out[titles[target]]
+        idx = titles[target]
+        item = out[idx]
         if "new_title" in amend:
             new_t = amend["new_title"]
             del titles[target]
             item["title"] = new_t
-            titles[new_t] = out.index(item)
+            # Usa el índice conocido, NO out.index(item): list.index compara por
+            # igualdad, así que con dos ítems de igual contenido devolvía el
+            # índice equivocado y corrompía el mapa de títulos.
+            titles[new_t] = idx
         if "new_rationale" in amend:
             item["rationale"] = amend["new_rationale"]
         if "new_blast_radius" in amend:
