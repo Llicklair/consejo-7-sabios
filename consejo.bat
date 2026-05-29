@@ -20,11 +20,16 @@ echo  Convocando al Consejo de los 7 Sabios
 echo  -------------------------------------
 echo  Tema:    Como mejoramos este proyecto?
 echo  Modo:    claude-code . consenso . opus
-echo  Rondas:  hasta 20 (duracion esperada 30-60 min)
+echo  Rondas:  min 5, max 8 (duracion esperada ~30-60 min)
+echo  Schema:  OFF (los sabios leen el repo de verdad)
+echo  En vivo: doble-clic en watch-debate.bat (otra ventana)
 echo.
 
-.venv\Scripts\python.exe -m consejo.cli "¿Cómo mejoramos este proyecto?" --mode claude-code --consensus --consensus-rounds 20 --cc-model opus --speed 0.3
+.venv\Scripts\python.exe -m consejo.cli "¿Cómo mejoramos este proyecto?" --mode claude-code --consensus --consensus-rounds 8 --consensus-min-rounds 5 --cc-model opus --speed 0.3
 
 echo.
-echo  Consejo finalizado. Pulsa una tecla para cerrar.
+echo  Consejo finalizado. El plan esta en consejo-report-*.md (este directorio).
+dir /b /o-d consejo-report-*.md 2>nul
+echo.
+echo  Pulsa una tecla para cerrar.
 pause >nul
