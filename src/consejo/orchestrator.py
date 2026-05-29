@@ -824,6 +824,14 @@ def render_plan_markdown(plan: dict, execution: dict | None = None) -> str:
                   "alguna ronda y luego firmaron tras enmiendas — la textura "
                   "del debate aunque el resultado final sea unánime._"]
 
+    # Puntos de impacto: qué archivos toca cada tarea (handoff a quien implemente)
+    impact = [t for t in plan["tasks"] if t.get("files_touched")]
+    if impact:
+        lines += ["", "## Puntos de impacto (archivos por tarea)", ""]
+        for t in impact:
+            files = ", ".join(f"`{f}`" for f in t["files_touched"])
+            lines.append(f"- **{t['title']}** → {files}")
+
     # Sección de ejecución (si modo auto se ejecutó)
     if execution:
         lines += ["", "## Tareas aplicadas (modo auto)", ""]
