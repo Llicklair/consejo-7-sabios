@@ -2,8 +2,9 @@
 
 This module is the *data* layer of the state machine. The asyncio bus
 (`EventBus`, `Publisher` contract) lives in `consejo.bus`; the mock
-driver lives in `consejo.drivers.mock`. EventBus and Publisher are
-re-exported here for backward compatibility with existing imports.
+animation driver lives in `consejo.animation_drivers.mock`. EventBus
+and Publisher are re-exported here for backward compatibility with
+existing imports.
 """
 
 from __future__ import annotations
@@ -62,6 +63,6 @@ def __getattr__(name: str):
         EventBus, Publisher = _reexport_bus()
         return EventBus if name == "EventBus" else Publisher
     if name == "mock_driver":
-        from .drivers.mock import mock_driver
+        from .animation_drivers.mock import mock_driver
         return mock_driver
     raise AttributeError(f"module 'consejo.states' has no attribute {name!r}")

@@ -319,8 +319,6 @@ def _gear_caballero(draw: ImageDraw.ImageDraw, sage: Sage) -> None:
 
 
 def _gear_berserker(draw: ImageDraw.ImageDraw, sage: Sage) -> None:
-    body = sage.sprite_color
-    body_d = darker(body, 0.55)
     hair = sage.accent_color  # pelo pelirrojo
     hair_d = darker(hair, 0.6)
     hair_l = lighter(hair, 1.3)
@@ -469,7 +467,6 @@ def _gear_picaro(draw: ImageDraw.ImageDraw, sage: Sage) -> None:
     accent = sage.accent_color  # verde brillante
     accent_l = lighter(accent, 1.3)
     leather = (90, 60, 35)
-    leather_d = (60, 38, 20)
     blade = (200, 205, 215)
     blade_d = (130, 135, 150)
 
@@ -592,9 +589,6 @@ def _gear_clerigo(draw: ImageDraw.ImageDraw, sage: Sage) -> None:
 
 
 def _gear_druida(draw: ImageDraw.ImageDraw, sage: Sage) -> None:
-    body = sage.sprite_color
-    body_l = lighter(body, 1.4)
-    accent = sage.accent_color  # marrón bastón
     leaf = (60, 160, 70)
     leaf_l = (130, 220, 100)
     leaf_d = (30, 100, 40)
@@ -1356,7 +1350,6 @@ def generate_fireplace() -> Image.Image:
     log = (110, 70, 30)
     log_l = (155, 105, 50)
     log_d = (70, 40, 12)
-    log_dd = (45, 22, 6)
     # Tronco grande inferior
     d.rectangle((14, 56, 49, 62), fill=OUTLINE)
     d.rectangle((15, 57, 48, 61), fill=log + (255,))
@@ -1888,7 +1881,6 @@ def generate_book_half_open() -> Image.Image:
     img = _new((20, 14))
     d = ImageDraw.Draw(img)
     leather = (140, 50, 50)
-    leather_d = (85, 28, 28)
     page = (240, 225, 180)
     page_d = (190, 170, 130)
     ink = (60, 35, 20)

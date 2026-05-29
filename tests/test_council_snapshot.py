@@ -20,7 +20,7 @@ from consejo.orchestrator import (
     scan_project,
 )
 from consejo.sages import ALL_SAGES, SAGES, VOICE_ONLY_SAGES
-from consejo.states import EventBus, State, StateEvent
+from consejo.states import EventBus
 
 
 def _run_mock_council(seed: int = 42, rounds: int = 3) -> dict:
@@ -123,8 +123,6 @@ def test_blast_radius_ordering_is_safe_first():
 @pytest.mark.parametrize("mode_name", ["claude-code", "real", "mock"])
 def test_cli_mode_choices_accept_modes(mode_name):
     """Regression: --mode must accept all three modes (CLI choices validation)."""
-    import argparse
-    from consejo import cli
     # Construct the same parser the CLI builds, then probe its --mode choices.
     parser_choices = {"mock", "real", "claude-code"}
     assert mode_name in parser_choices

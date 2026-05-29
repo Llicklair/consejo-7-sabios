@@ -13,7 +13,8 @@ the mutation works, is idempotent on re-apply, and tolerates edge inputs.
 
 from __future__ import annotations
 
-from consejo.claude_code_driver import TURN_SCHEMA, _apply_plan_diff
+from consejo.consensus import _apply_plan_diff
+from consejo.schemas import TURN_SCHEMA
 
 
 def _seed_plan() -> list[dict]:

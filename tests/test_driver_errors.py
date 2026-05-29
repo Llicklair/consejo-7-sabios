@@ -7,7 +7,7 @@ can distinguish failure modes without string matching.
 
 from __future__ import annotations
 
-from consejo.claude_code_driver import (
+from consejo.driver_errors import (
     DriverCLINotFoundError,
     DriverEmptyResultError,
     DriverError,

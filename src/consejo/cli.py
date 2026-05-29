@@ -21,6 +21,7 @@ import unicodedata
 from datetime import datetime
 from pathlib import Path
 
+from .backends import build_backend
 from .executor import execute_safe_tasks, is_git_repo
 from .orchestrator import render_plan_markdown, run_council
 from .states import MAX_DEBATE_ROUNDS, EventBus, State
@@ -48,6 +49,7 @@ def _build_driver(atasco: str, repo: Path, mode: str, speed: float,
                   consensus_mode: bool = False,
                   consensus_max_rounds: int = 20,
                   consensus_min_rounds: int = 1,
+                  backend: str = "claude-code",
                   out_holder: dict | None = None):
     """Devuelve una corutina (bus) -> None lista para pasar al animator.
 
@@ -71,6 +73,7 @@ def _build_driver(atasco: str, repo: Path, mode: str, speed: float,
             consensus_mode=consensus_mode,
             consensus_max_rounds=consensus_max_rounds,
             consensus_min_rounds=consensus_min_rounds,
+            backend=backend,
         )
         execution = None
         if execute_mode == "auto" and await is_git_repo(repo):
@@ -98,6 +101,7 @@ async def _run_headless(atasco: str, repo: Path, mode: str, speed: float,
                         consensus_mode: bool = False,
                         consensus_max_rounds: int = 20,
                         consensus_min_rounds: int = 1,
+                        backend: str = "claude-code",
                         out_holder: dict | None = None) -> Path:
     bus = EventBus()
     driver = _build_driver(atasco, repo, mode, speed, target_rounds, seed,
@@ -107,6 +111,7 @@ async def _run_headless(atasco: str, repo: Path, mode: str, speed: float,
                            consensus_mode=consensus_mode,
                            consensus_max_rounds=consensus_max_rounds,
                            consensus_min_rounds=consensus_min_rounds,
+                           backend=backend,
                            out_holder=out_holder)
 
     async def consume_print() -> None:
@@ -177,6 +182,12 @@ def main() -> None:
     parser.add_argument("--cc-model", default="opus",
                         help="Model for --mode claude-code (sonnet|opus|alias). "
                              "Default: opus (deeper debate; cheaper switch: --cc-model sonnet)")
+    parser.add_argument("--backend", choices=["claude-code", "codex"],
+                        default="claude-code",
+                        help="Backend CLI for sage subprocesses. "
+                             "claude-code: uses `claude -p` (default). "
+                             "codex: uses OpenAI `codex exec`. "
+                             "Only applies with --mode claude-code.")
     parser.add_argument("--rounds", type=int, default=3,
                         help="Rondas objetivo de debate. mock/real: 1..30. "
                              "claude-code: auto-capped to 1-2 (round 1 propose, "
@@ -225,8 +236,20 @@ def main() -> None:
             parser.error(_error_missing_api_key())
 
     if args.mode == "claude-code":
-        from .claude_code_driver import claude_available, find_orphan_claude_processes
-        if not claude_available():
+        from .claude_code_driver import find_orphan_claude_processes
+        try:
+            backend_instance = build_backend(args.backend)
+        except ValueError as e:
+            parser.error(str(e))
+        if not backend_instance.available():
+            if args.backend == "codex":
+                parser.error(
+                    "--backend codex requires the `codex` CLI in PATH / "
+                    "requiere el CLI `codex` en PATH.\n\n"
+                    "  Install: npm install -g @openai/codex\n"
+                    "  Verify:  codex --version\n\n"
+                    "If installed but not found, restart the shell so PATH is reloaded."
+                )
             parser.error(_error_missing_claude_cli())
         orphans = find_orphan_claude_processes()
         if orphans:
@@ -256,6 +279,7 @@ def main() -> None:
             consensus_mode=args.consensus,
             consensus_max_rounds=args.consensus_rounds,
             consensus_min_rounds=args.consensus_min_rounds,
+            backend=args.backend,
             out_holder=out_holder,
         ))
     else:
@@ -268,6 +292,7 @@ def main() -> None:
                                consensus_mode=args.consensus,
                                consensus_max_rounds=args.consensus_rounds,
                                consensus_min_rounds=args.consensus_min_rounds,
+                               backend=args.backend,
                                out_holder=out_holder)
         asyncio.run(animate(
             speed=args.speed,

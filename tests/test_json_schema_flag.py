@@ -15,11 +15,11 @@ from pathlib import Path
 import pytest
 
 from consejo.claude_code_driver import (
-    PROPOSAL_SCHEMA,
     _build_claude_args,
-    _extract_json_object,
     _json_schema_enabled,
 )
+from consejo.json_utils import _extract_json_object
+from consejo.schemas import PROPOSAL_SCHEMA
 
 
 def test_json_schema_enabled_by_default(monkeypatch: pytest.MonkeyPatch) -> None:

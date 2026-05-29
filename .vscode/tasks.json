@@ -54,9 +54,9 @@
         "-m", "consejo.cli",
         "¿Cómo mejoramos este proyecto?",
         "--mode", "claude-code",
-        "--cc-model", "opus",
+        "--cc-model", "sonnet",
         "--consensus",
-        "--consensus-rounds", "20",
+        "--consensus-rounds", "8",
         "--speed", "0.3"
       ],
       "options": {
@@ -72,6 +72,56 @@
       "group": { "kind": "build", "isDefault": true }
     },
     {
+      "label": "Consejo: mejorar este proyecto (Codex)",
+      "type": "shell",
+      "command": "${workspaceFolder}/.venv/Scripts/python.exe",
+      "args": [
+        "-m", "consejo.cli",
+        "¿Cómo mejoramos este proyecto?",
+        "--mode", "claude-code",
+        "--backend", "codex",
+        "--cc-model", "gpt-5-codex",
+        "--consensus",
+        "--consensus-rounds", "8",
+        "--speed", "0.3"
+      ],
+      "options": {
+        "env": { "PYTHONPATH": "src" }
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "new",
+        "clear": true,
+        "focus": true
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Consejo: invocar (Codex, CONSENSUS conversacional)",
+      "type": "shell",
+      "command": "${workspaceFolder}/.venv/Scripts/python.exe",
+      "args": [
+        "-m", "consejo.cli",
+        "${input:atasco}",
+        "--mode", "claude-code",
+        "--backend", "codex",
+        "--cc-model", "gpt-5-codex",
+        "--consensus",
+        "--consensus-rounds", "8",
+        "--speed", "0.3"
+      ],
+      "options": {
+        "env": { "PYTHONPATH": "src" }
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "new",
+        "clear": true,
+        "focus": true
+      },
+      "problemMatcher": []
+    },
+    {
       "label": "Consejo: invocar (claude-code, CONSENSUS conversacional)",
       "type": "shell",
       "command": "${workspaceFolder}/.venv/Scripts/python.exe",
@@ -79,9 +129,9 @@
         "-m", "consejo.cli",
         "${input:atasco}",
         "--mode", "claude-code",
-        "--cc-model", "opus",
+        "--cc-model", "sonnet",
         "--consensus",
-        "--consensus-rounds", "20",
+        "--consensus-rounds", "8",
         "--speed", "0.3"
       ],
       "options": {

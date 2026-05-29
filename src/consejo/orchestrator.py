@@ -26,8 +26,9 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import TypedDict
 
-from . import metrics
-from .sages import SAGES, Sage
+from .backends import build_backend
+from .driver_protocol import set_driver
+from .sages import ALL_SAGES, SAGES, Sage
 from .states import MAX_DEBATE_ROUNDS, EventBus, State, StateEvent
 from .translator import translate_atasco_to_en, translate_plan_to_es
 
@@ -97,7 +98,6 @@ def scan_project(repo: Path, max_files: int = 80,
     import os
     files: list[tuple[str, str]] = []
     aggregate_bytes = 0
-    capped = False
     for root, dirnames, fnames in os.walk(repo):
         dirnames[:] = [d for d in dirnames if d not in SCAN_EXCLUDE_DIRS]
         for fname in sorted(fnames):
@@ -107,24 +107,13 @@ def scan_project(repo: Path, max_files: int = 80,
             try:
                 content = p.read_text(encoding="utf-8", errors="ignore")[:max_bytes_per_file]
                 if aggregate_bytes + len(content) > max_aggregate_bytes:
-                    capped = True
-                    metrics.record("scan", files=len(files),
-                                   aggregate_bytes=aggregate_bytes,
-                                   capped_by="aggregate")
                     return files
                 files.append((str(p.relative_to(repo)), content))
                 aggregate_bytes += len(content)
                 if len(files) >= max_files:
-                    capped = True
-                    metrics.record("scan", files=len(files),
-                                   aggregate_bytes=aggregate_bytes,
-                                   capped_by="max_files")
                     return files
             except Exception:
                 continue
-    if not capped:
-        metrics.record("scan", files=len(files),
-                       aggregate_bytes=aggregate_bytes, capped_by=None)
     return files
 
 
@@ -185,8 +174,6 @@ def build_briefing(files: list[tuple[str, str]],
         selected = files[:max_files_in_briefing]
         out.append(f"## {len(files)} files scanned. Showing top {len(selected)}.")
     aggregate_bytes = sum(len(line) + 1 for line in out)
-    files_included = 0
-    capped = False
     for path, content in selected:
         chunk = [
             f"\n### `{path}`",
@@ -196,20 +183,10 @@ def build_briefing(files: list[tuple[str, str]],
         ]
         chunk_bytes = sum(len(line) + 1 for line in chunk)
         if aggregate_bytes + chunk_bytes > max_aggregate_bytes:
-            capped = True
             break
         out.extend(chunk)
         aggregate_bytes += chunk_bytes
-        files_included += 1
     briefing = "\n".join(out)
-    metrics.record(
-        "briefing",
-        sage=for_sage.id if for_sage else None,
-        files_offered=len(selected),
-        files_included=files_included,
-        briefing_bytes=len(briefing),
-        capped=capped,
-    )
     return briefing
 
 
@@ -402,7 +379,7 @@ def _parse_model_json(text: str) -> dict:
             text = text[4:].strip()
     try:
         return json.loads(text)
-    except json.JSONDecodeError as e:
+    except json.JSONDecodeError:
         first = text.find("{")
         last = text.rfind("}")
         if first != -1 and last > first:
@@ -553,7 +530,8 @@ async def run_council(atasco: str, repo: Path, bus: EventBus,
                       cc_model: str = "sonnet",
                       consensus_mode: bool = False,
                       consensus_max_rounds: int = 20,
-                      consensus_min_rounds: int = 1) -> dict:
+                      consensus_min_rounds: int = 1,
+                      backend: str = "claude-code") -> dict:
     """Ejecuta el consejo completo y empuja eventos al bus para el animator.
 
     `atasco_lang`: idioma del atasco del usuario ('es' o 'en'). Si es 'es' y
@@ -579,8 +557,8 @@ async def run_council(atasco: str, repo: Path, bus: EventBus,
     # do their own repo reading and there is no multi-round sign/amend loop.
     # The ANALIZANDO phase covers the time the subagents work in parallel.
     if mode == "claude-code" and consensus_mode:
-        from .claude_code_driver import consensus_dialogue, post_consensus_vision
-        from .sages import ALL_SAGES
+        from .consensus import consensus_dialogue, post_consensus_vision
+        set_driver(build_backend(backend))
         await asyncio.sleep(2.0 / speed)
 
         prev_signed: set[int] = set()
@@ -645,6 +623,7 @@ async def run_council(atasco: str, repo: Path, bus: EventBus,
         from .claude_code_driver import (
             gather_all_proposals, gather_all_critiques, judge_synthesis,
         )
+        set_driver(build_backend(backend))
         await asyncio.sleep(2.0 / speed)
         cc_rounds = max(1, min(target_rounds, 2))
 

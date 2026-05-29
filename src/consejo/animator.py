@@ -38,8 +38,8 @@ from .renderer import ASSETS_DIR, load_sage_sprite, load_tile, upscale
 from .report import generate_fake_report
 from .sages import SAGES, RGB
 from .scene import (
-    CANVAS_H, CANVAS_W, DOOR_SPRITE_XY, FIREPLACE_XY, SEATS,
-    TABLE_X, TABLE_Y, TABLE_W, TABLE_H,
+    DOOR_SPRITE_XY, FIREPLACE_XY, SEATS,
+    TABLE_X, TABLE_Y, TABLE_W,
     apply_lighting, apply_table_decor, compose_room, random_seat_indices,
 )
 from .sound import SoundPlayer
@@ -49,7 +49,6 @@ from .states import (
     DEFAULT_TIMINGS,
     EventBus,
     State,
-    StateEvent,
     mock_driver,
 )
 
@@ -143,7 +142,6 @@ def _draw_signatures(canvas: Image.Image, seat_indices: list[int],
         canvas.paste(seal, (seal_x, seal_y_b), seal)
         # Brillo extra alrededor del sello si es muy reciente
         if new_signs_age < 0.6:
-            d = ImageDraw.Draw(canvas)
             cx, cy = seal_x + seal.width // 2, seal_y_b + seal.height // 2
             r = 7 + int(new_signs_age * 6)
             alpha = max(0, int(180 * (1 - new_signs_age / 0.6)))

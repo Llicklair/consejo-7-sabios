@@ -21,7 +21,6 @@ from __future__ import annotations
 import argparse
 import math
 import random
-import struct
 import threading
 import wave
 from array import array
