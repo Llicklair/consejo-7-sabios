@@ -42,7 +42,7 @@ from .driver_errors import (
     DriverProcessError,
     DriverTimeoutError,
 )
-from .driver_protocol import get_driver
+from .driver_protocol import SageDriver
 from .json_utils import _extract_json_object
 from .sages import ALL_SAGES, Sage
 from .schemas import CRITIQUE_SCHEMA, JUDGE_SCHEMA, PROPOSAL_SCHEMA
@@ -259,10 +259,11 @@ wall time under ~3x the unbounded case."""
 
 
 async def propose_one_sage(
-    sage: Sage, atasco: str, repo: Path, round_num: int, model: str
+    driver: SageDriver, sage: Sage, atasco: str, repo: Path,
+    round_num: int, model: str,
 ) -> tuple[Sage, list[dict]]:
     async with _SPAWN_SEM:
-        inner = await get_driver().spawn(
+        inner = await driver.spawn(
             user_msg=_build_sage_user_message(atasco, repo, round_num),
             system_prompt=_sage_system_prompt(sage),
             schema=PROPOSAL_SCHEMA,
@@ -273,7 +274,7 @@ async def propose_one_sage(
 
 
 async def gather_all_proposals(
-    atasco: str, repo: Path, model: str = "sonnet",
+    driver: SageDriver, atasco: str, repo: Path, model: str = "sonnet",
     on_complete=None,
 ) -> dict[str, list[dict]]:
     """Run all 7 sages in parallel.
@@ -284,7 +285,7 @@ async def gather_all_proposals(
     a single blocking wait.
     """
     pending: dict[asyncio.Task, Sage] = {
-        asyncio.create_task(propose_one_sage(s, atasco, repo, 1, model)): s
+        asyncio.create_task(propose_one_sage(driver, s, atasco, repo, 1, model)): s
         for s in ALL_SAGES
     }
     by_sage: dict[str, list[dict]] = {}
@@ -310,12 +311,12 @@ async def gather_all_proposals(
 
 
 async def critique_one_sage(
-    sage: Sage, atasco: str, repo: Path,
+    driver: SageDriver, sage: Sage, atasco: str, repo: Path,
     round1_by_sage: dict[str, list[dict]],
     model: str,
 ) -> tuple[Sage, dict]:
     async with _SPAWN_SEM:
-        inner = await get_driver().spawn(
+        inner = await driver.spawn(
             user_msg=_build_critique_user_message(atasco, repo, round1_by_sage, sage.id),
             system_prompt=_sage_critique_system_prompt(sage),
             schema=CRITIQUE_SCHEMA,
@@ -326,7 +327,7 @@ async def critique_one_sage(
 
 
 async def gather_all_critiques(
-    atasco: str, repo: Path,
+    driver: SageDriver, atasco: str, repo: Path,
     round1_by_sage: dict[str, list[dict]],
     model: str = "sonnet",
     on_complete=None,
@@ -337,7 +338,7 @@ async def gather_all_critiques(
         if s.id not in round1_by_sage:
             continue
         pending[asyncio.create_task(
-            critique_one_sage(s, atasco, repo, round1_by_sage, model)
+            critique_one_sage(driver, s, atasco, repo, round1_by_sage, model)
         )] = s
     by_sage: dict[str, dict] = {}
     while pending:
@@ -362,6 +363,7 @@ async def gather_all_critiques(
 
 
 async def judge_synthesis(
+    driver: SageDriver,
     atasco: str,
     proposals_by_sage: dict[str, list[dict]],
     critiques_by_sage: dict[str, dict] | None = None,
@@ -371,7 +373,7 @@ async def judge_synthesis(
     """Run the judge to synthesize all proposals into a prioritized plan +
     a strategic vision. Always uses Opus regardless of `model` — synthesis
     is where depth/coherence pay off the most."""
-    inner = await get_driver().spawn(
+    inner = await driver.spawn(
         user_msg=_build_judge_user_message(atasco, proposals_by_sage, critiques_by_sage),
         system_prompt=_judge_system_prompt(),
         schema=JUDGE_SCHEMA,

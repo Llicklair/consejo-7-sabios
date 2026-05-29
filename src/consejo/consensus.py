@@ -1,7 +1,8 @@
 """Consensus dialogue: round-robin turn-by-turn debate until unanimity or cap.
 
-This module is backend-agnostic — it calls `get_driver().spawn(...)` so
-swapping Claude Code for Codex requires no change here.
+This module is backend-agnostic — it calls `driver.spawn(...)` on the
+SageDriver passed in by the orchestrator, so swapping Claude Code for Codex
+requires no change here.
 """
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ from .council_prompts import (
     _consensus_system_prompt,
     _consensus_turn_user_message,
 )
-from .driver_protocol import get_driver
+from .driver_protocol import SageDriver
 from .sages import Sage
 from .schemas import TURN_SCHEMA, _VISION_SCHEMA
 
@@ -72,6 +73,7 @@ def _is_unanimous(plan: list[dict], votes: dict[str, dict], sage_ids: list[str])
 
 
 async def consensus_dialogue(
+    driver: SageDriver,
     atasco: str,
     repo: Path,
     sages: list[Sage],
@@ -140,7 +142,7 @@ async def consensus_dialogue(
                 turn_in_round=i, total_sages=len(sages),
             )
             try:
-                turn_out = await get_driver().spawn(
+                turn_out = await driver.spawn(
                     user_msg=user_msg,
                     system_prompt=_consensus_system_prompt(sage),
                     schema=TURN_SCHEMA,
@@ -280,6 +282,7 @@ async def consensus_dialogue(
 
 
 async def post_consensus_vision(
+    driver: SageDriver,
     atasco: str,
     plan_tasks: list[dict],
     transcript: list[dict],
@@ -337,7 +340,7 @@ async def post_consensus_vision(
         f"```json\n{json.dumps(_VISION_SCHEMA, indent=2)}\n```\n\n"
         f"Output ONLY the JSON object. No prose outside, no markdown fences."
     )
-    inner = await get_driver().spawn(
+    inner = await driver.spawn(
         user_msg=user_msg,
         system_prompt=sys_prompt,
         schema=_VISION_SCHEMA,

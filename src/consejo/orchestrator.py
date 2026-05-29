@@ -27,7 +27,6 @@ from pathlib import Path
 from typing import TypedDict
 
 from .backends import build_backend
-from .driver_protocol import set_driver
 from .sages import DEBATE_SAGES, SAGES, Sage
 from .states import MAX_DEBATE_ROUNDS, EventBus, State, StateEvent
 from .translator import translate_atasco_to_en, translate_plan_to_es
@@ -561,7 +560,7 @@ async def run_council(atasco: str, repo: Path, bus: EventBus,
     # The ANALIZANDO phase covers the time the subagents work in parallel.
     if mode == "claude-code" and consensus_mode:
         from .consensus import consensus_dialogue, post_consensus_vision
-        set_driver(build_backend(backend))
+        driver = build_backend(backend)
         await asyncio.sleep(2.0 / speed)
 
         prev_signed: set[int] = set()
@@ -590,7 +589,7 @@ async def run_council(atasco: str, repo: Path, bus: EventBus,
             })
 
         plan = await consensus_dialogue(
-            atasco, repo, list(DEBATE_SAGES),
+            driver, atasco, repo, list(DEBATE_SAGES),
             max_rounds=consensus_max_rounds,
             min_rounds=consensus_min_rounds,
             model=cc_model,
@@ -603,7 +602,7 @@ async def run_council(atasco: str, repo: Path, bus: EventBus,
         if plan.get("unanimous"):
             try:
                 vision = await post_consensus_vision(
-                    atasco, plan.get("tasks") or [],
+                    driver, atasco, plan.get("tasks") or [],
                     plan.get("transcript") or [],
                     model="opus",
                 )
@@ -631,7 +630,7 @@ async def run_council(atasco: str, repo: Path, bus: EventBus,
         from .claude_code_driver import (
             gather_all_proposals, gather_all_critiques, judge_synthesis,
         )
-        set_driver(build_backend(backend))
+        driver = build_backend(backend)
         await asyncio.sleep(2.0 / speed)
         cc_rounds = max(1, min(target_rounds, 2))
 
@@ -649,7 +648,7 @@ async def run_council(atasco: str, repo: Path, bus: EventBus,
             })
 
         proposals_by_sage = await gather_all_proposals(
-            atasco, repo, model=cc_model, on_complete=_on_propose_done,
+            driver, atasco, repo, model=cc_model, on_complete=_on_propose_done,
         )
         await asyncio.sleep(1.5 / speed)
 
@@ -669,7 +668,7 @@ async def run_council(atasco: str, repo: Path, bus: EventBus,
                 })
 
             critiques_by_sage = await gather_all_critiques(
-                atasco, repo, proposals_by_sage,
+                driver, atasco, repo, proposals_by_sage,
                 model=cc_model, on_complete=_on_critique_done,
             )
             await asyncio.sleep(1.5 / speed)
@@ -684,7 +683,7 @@ async def run_council(atasco: str, repo: Path, bus: EventBus,
 
         await emit(State.JUEZ)
         plan = await judge_synthesis(
-            atasco, proposals_by_sage,
+            driver, atasco, proposals_by_sage,
             critiques_by_sage=critiques_by_sage,
             rounds_used=cc_rounds, model=cc_model,
         )
