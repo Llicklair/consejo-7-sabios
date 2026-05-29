@@ -9,6 +9,11 @@ raise them so the orchestrator handles failures uniformly.
 from __future__ import annotations
 
 
+def _fmt_context(ctx: dict) -> str:
+    """Render a structured-context dict as a compact `k=v k=v` string."""
+    return " ".join(f"{k}={v}" for k, v in ctx.items())
+
+
 class DriverError(Exception):
     """Base class for errors raised at the Claude-CLI subprocess boundary.
 
@@ -25,20 +30,31 @@ class DriverCLINotFoundError(DriverError):
 
 
 class DriverTimeoutError(DriverError):
-    def __init__(self, timeout_s: float) -> None:
+    def __init__(self, timeout_s: float, context: dict | None = None) -> None:
         self.timeout_s = timeout_s
-        super().__init__(f"claude CLI timed out after {timeout_s}s")
+        # Structured operational context (model, payload sizes, retry attempt)
+        # so a timeout is debuggable without re-running — which sage call, how
+        # big was the payload, was it already a retry.
+        self.context = context or {}
+        msg = f"claude CLI timed out after {timeout_s}s"
+        if self.context:
+            msg += f" [{_fmt_context(self.context)}]"
+        super().__init__(msg)
 
 
 class DriverProcessError(DriverError):
     def __init__(self, returncode: int, stderr_head: str,
-                 stdout_head: str, stderr_len: int, stdout_len: int) -> None:
+                 stdout_head: str, stderr_len: int, stdout_len: int,
+                 context: dict | None = None) -> None:
         self.returncode = returncode
         self.stderr_head = stderr_head
         self.stdout_head = stdout_head
+        self.context = context or {}
         rc_signed = returncode - 2**32 if returncode > 2**31 else returncode
         diag = (f"returncode={returncode} (signed={rc_signed}) "
                 f"stderr_len={stderr_len} stdout_len={stdout_len}")
+        if self.context:
+            diag += f" {_fmt_context(self.context)}"
         super().__init__(
             f"claude CLI failed: {diag}\n"
             f"--stderr--\n{stderr_head}\n"

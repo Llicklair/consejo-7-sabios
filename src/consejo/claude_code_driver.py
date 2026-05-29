@@ -166,7 +166,15 @@ async def _spawn_claude(
     except TimeoutError:
         proc.kill()
         await proc.wait()
-        raise DriverTimeoutError(timeout_s=timeout_s) from None
+        raise DriverTimeoutError(
+            timeout_s=timeout_s,
+            context={
+                "model": model,
+                "user_msg_bytes": len(user_msg.encode("utf-8")),
+                "system_prompt_bytes": len(system_prompt.encode("utf-8")),
+                "retry_attempt": retry_attempt,
+            },
+        ) from None
 
     if proc.returncode != 0:
         err = stderr.decode("utf-8", errors="replace")[:2000]
@@ -177,6 +185,12 @@ async def _spawn_claude(
             stdout_head=head,
             stderr_len=len(stderr),
             stdout_len=len(stdout),
+            context={
+                "model": model,
+                "user_msg_bytes": len(user_msg.encode("utf-8")),
+                "system_prompt_bytes": len(system_prompt.encode("utf-8")),
+                "retry_attempt": retry_attempt,
+            },
         )
 
     out = stdout.decode("utf-8", errors="replace")
