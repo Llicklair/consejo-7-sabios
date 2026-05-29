@@ -19,7 +19,7 @@ from consejo.orchestrator import (
     run_council,
     scan_project,
 )
-from consejo.sages import ALL_SAGES, SAGES, VOICE_ONLY_SAGES
+from consejo.sages import ALL_SAGES, DEBATE_SAGES, SAGES, VOICE_ONLY_SAGES
 from consejo.states import EventBus
 
 
@@ -47,16 +47,18 @@ def _run_mock_council(seed: int = 42, rounds: int = 3) -> dict:
     return asyncio.run(_go())
 
 
-def test_roster_has_seven_visible_and_two_voice_only():
+def test_roster_has_seven_sages_six_debaters_one_judge():
     assert len(SAGES) == 7
-    assert len(VOICE_ONLY_SAGES) == 2
-    assert len(ALL_SAGES) == 9
-    voice_ids = {s.id for s in VOICE_ONLY_SAGES}
-    assert voice_ids == {"disenador", "estratega"}
+    assert len(VOICE_ONLY_SAGES) == 0, "voice-only sages have been retired into seated roles"
+    assert len(ALL_SAGES) == 7
+    assert len(DEBATE_SAGES) == 6
+    debate_ids = {s.id for s in DEBATE_SAGES}
+    assert "juez" not in debate_ids
+    assert "juez" in {s.id for s in SAGES}
 
 
 def test_sage_keywords_cover_all_sages():
-    """Every sage (visible or voice-only) must have keywords for briefing."""
+    """Every sage must have keywords for briefing."""
     for sage in ALL_SAGES:
         assert sage.id in SAGE_KEYWORDS, f"missing keywords: {sage.id}"
         assert len(SAGE_KEYWORDS[sage.id]) >= 5
@@ -66,13 +68,14 @@ def test_build_briefing_actually_filters_per_sage():
     """Phase B bug regression: each sage must receive different file rankings."""
     repo = Path(__file__).resolve().parent.parent
     files = scan_project(repo)
-    arch_briefing = build_briefing(files, for_sage=SAGES[0])
-    guard_idx = next(i for i, s in enumerate(SAGES) if s.id == "guardian")
-    guard_briefing = build_briefing(files, for_sage=SAGES[guard_idx])
-    arch_first_file = arch_briefing.split("### `")[1].split("`")[0]
+    # Estructurador (index 0) uses architecture/design keywords
+    struct_briefing = build_briefing(files, for_sage=DEBATE_SAGES[0])
+    guard_idx = next(i for i, s in enumerate(DEBATE_SAGES) if s.id == "guardian")
+    guard_briefing = build_briefing(files, for_sage=DEBATE_SAGES[guard_idx])
+    struct_first_file = struct_briefing.split("### `")[1].split("`")[0]
     guard_first_file = guard_briefing.split("### `")[1].split("`")[0]
-    assert arch_first_file != guard_first_file, (
-        "build_briefing fake-filter regression: Architect and Guardian "
+    assert struct_first_file != guard_first_file, (
+        "build_briefing fake-filter regression: Estructurador and Guardian "
         "must see different top-ranked files"
     )
 
@@ -126,3 +129,19 @@ def test_cli_mode_choices_accept_modes(mode_name):
     # Construct the same parser the CLI builds, then probe its --mode choices.
     parser_choices = {"mock", "real", "claude-code"}
     assert mode_name in parser_choices
+
+
+def test_format_transcript_respects_keep_messages_count():
+    from consejo.council_prompts import _format_transcript_for_turn
+    transcript = [
+        {"turn": 1, "sage_id": "architect", "message": "msg1", "vote": {"signed": False}},
+        {"turn": 2, "sage_id": "conservative", "message": "msg2", "vote": {"signed": False}},
+        {"turn": 3, "sage_id": "modernizer", "message": "msg3", "vote": {"signed": False}},
+    ]
+    formatted = _format_transcript_for_turn(transcript, keep_messages_count=2)
+    assert "turn 1 · architect · BLOCK --- (message omitted)" in formatted or "turn 1 · architect · BLOCK (message omitted)" in formatted
+    assert "turn 2 · conservative · BLOCK ---" in formatted
+    assert "msg2" in formatted
+    assert "turn 3 · modernizer · BLOCK ---" in formatted
+    assert "msg3" in formatted
+

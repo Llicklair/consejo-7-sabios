@@ -46,6 +46,10 @@ def _apply_plan_diff(plan: list[dict], diff: dict) -> list[dict]:
             item["rationale"] = amend["new_rationale"]
         if "new_blast_radius" in amend:
             item["blast_radius"] = amend["new_blast_radius"]
+        if "new_category" in amend:
+            item["category"] = amend["new_category"]
+        if "new_horizon" in amend:
+            item["horizon"] = amend["new_horizon"]
         if "new_files_touched" in amend:
             item["files_touched"] = list(amend["new_files_touched"])
     for rm in diff.get("remove", []) or []:
@@ -79,10 +83,11 @@ async def consensus_dialogue(
     """Round-robin turn-by-turn dialogue until all sages sign the same plan.
 
     Each turn carries the full transcript + current plan. A round = one turn
-    per sage in ALL_SAGES order. Stops at unanimity (only after `min_rounds`)
-    or `max_rounds`. `min_rounds` forces the council to keep iterating even
-    if everyone signs early — useful when premature convergence hides
-    insufficiently-explored axes.
+    per sage in the provided `sages` list order. The Juez is NOT included here
+    — pass DEBATE_SAGES (the six debaters) so the judge only synthesizes at
+    the end. Stops at unanimity (only after `min_rounds`) or `max_rounds`.
+    `min_rounds` forces the council to keep iterating even if everyone signs
+    early — useful when premature convergence hides insufficiently-explored axes.
 
     Returns a dict shaped like `judge_synthesis`'s output so the existing
     report writer works unchanged.
@@ -299,7 +304,7 @@ async def post_consensus_vision(
         for e in transcript[-30:]  # last 30 turns carry the convergence story
     ]
     sys_prompt = (
-        "You are the Strategist of the Council. The nine sages have reached "
+        "You are the Judge of the Council. The six sages have reached "
         "consensus on the TACTICAL plan. Your job is to read their debate and "
         "name where the project SHOULD GO — the strategic vision that the "
         "tactical tasks serve. This is what the user reads to decide what the "

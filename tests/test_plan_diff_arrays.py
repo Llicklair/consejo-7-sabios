@@ -119,3 +119,40 @@ def test_turn_schema_declares_new_files_touched() -> None:
     assert "new_files_touched" in amend_props
     assert amend_props["new_files_touched"]["type"] == "array"
     assert amend_props["new_files_touched"]["items"] == {"type": "string"}
+
+
+def test_amend_can_replace_category_and_horizon() -> None:
+    plan = [
+        {
+            "title": "Unify imports",
+            "rationale": "clean formatting",
+            "blast_radius": "SAFE",
+            "category": "code-fix",
+            "horizon": "now",
+            "files_touched": ["a.py"],
+        }
+    ]
+    diff = {
+        "amend": [{
+            "target_title": "Unify imports",
+            "new_category": "strategic-direction",
+            "new_horizon": "next-quarter",
+        }],
+    }
+    out = _apply_plan_diff(plan, diff)
+    assert out[0]["category"] == "strategic-direction"
+    assert out[0]["horizon"] == "next-quarter"
+
+
+def test_turn_schema_declares_new_category_and_new_horizon() -> None:
+    amend_props = (
+        TURN_SCHEMA["properties"]["plan_diff"]
+                   ["properties"]["amend"]
+                   ["items"]["properties"]
+    )
+    assert "new_category" in amend_props
+    assert "new_horizon" in amend_props
+    assert amend_props["new_category"]["enum"] == [
+        "code-fix", "future-feature", "strategic-direction", "research-thread"
+    ]
+    assert amend_props["new_horizon"]["enum"] == ["now", "next-quarter", "next-year"]

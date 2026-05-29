@@ -223,6 +223,13 @@ TURN_SCHEMA = {
                             "new_title": {"type": "string"},
                             "new_rationale": {"type": "string"},
                             "new_blast_radius": {"enum": ["SAFE", "MEDIUM", "RISKY"]},
+                            "new_category": {
+                                "enum": [
+                                    "code-fix", "future-feature",
+                                    "strategic-direction", "research-thread",
+                                ],
+                            },
+                            "new_horizon": {"enum": ["now", "next-quarter", "next-year"]},
                             "new_files_touched": {
                                 "type": "array",
                                 "items": {"type": "string"},

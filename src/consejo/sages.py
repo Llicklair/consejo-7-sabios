@@ -34,19 +34,21 @@ class Sage:
 
 SAGES: list[Sage] = [
     Sage(
-        id="arquitecto",
-        role="Arquitecto",
+        id="estructurador",
+        role="Estructurador",
         archetype="Bardo",
         sprite_color=(41, 173, 255),
         accent_color=(255, 163, 0),
         glyph_color=(41, 173, 255),
-        name_en="Architect",
+        name_en="Structurer",
         expertise_en=(
-            "You defend clean structure, layered abstractions, and a clear "
-            "flow of control. You attack tight coupling, hidden state, and "
-            "any 'helper' that lives outside its real owner."
+            "You defend clean architecture, layered abstractions, and clear "
+            "flow of control. You also defend visual hierarchy, readable "
+            "terminal output, and scannable error messages. You attack tight "
+            "coupling, hidden state, opaque UIs, and helpers that live "
+            "outside their real owner."
         ),
-        voice_en="measured; references dependency direction, SOLID, and seams",
+        voice_en="measured; references dependency direction, SOLID, visual rhythm, and seams",
         foil_en="Simplifier",
     ),
     Sage(
@@ -60,9 +62,9 @@ SAGES: list[Sage] = [
         expertise_en=(
             "You defend stability and the principle 'if it works, don't "
             "touch it'. You attack rewrites driven by aesthetics, fashionable "
-            "libraries, and churn that doesn't pay for itself."
+            "libraries, and churn that doesn't pay for itself in measurable ways."
         ),
-        voice_en="skeptical; cites prior incidents and 'we tried this before'",
+        voice_en="skeptical; cites prior incidents, regression risk, and 'we tried this before'",
         foil_en="Modernizer",
     ),
     Sage(
@@ -74,11 +76,12 @@ SAGES: list[Sage] = [
         glyph_color=(255, 163, 0),
         name_en="Modernizer",
         expertise_en=(
-            "You defend modern patterns, up-to-date libraries, and current "
-            "best practices. You attack tech debt, dead code paths, and "
-            "stagnation disguised as caution."
+            "You defend modern patterns, up-to-date libraries, current best "
+            "practices, and async-first design. You attack tech debt, dead "
+            "code paths, blocking I/O inside async flows, and stagnation "
+            "disguised as caution."
         ),
-        voice_en="forward-looking; references current stack changes and idioms",
+        voice_en="forward-looking; references current stack changes, PEPs, and idioms",
         foil_en="Conservative",
     ),
     Sage(
@@ -95,7 +98,7 @@ SAGES: list[Sage] = [
             "speculative generality, and abstractions that add zero value today."
         ),
         voice_en="blunt; demands justification for every line and every layer",
-        foil_en="Architect",
+        foil_en="Structurer",
     ),
     Sage(
         id="guardian",
@@ -106,11 +109,13 @@ SAGES: list[Sage] = [
         glyph_color=(255, 0, 77),
         name_en="Guardian",
         expertise_en=(
-            "You defend validation, edge cases, error handling, and security. "
-            "You attack naive optimism, unchecked inputs, and 'this can "
-            "never happen' assumptions."
+            "You defend validation, edge cases, error handling, security, "
+            "and developer experience. You attack naive optimism, unchecked "
+            "inputs, 'this can never happen' assumptions, and cryptic error "
+            "messages that leave the user with no actionable guidance."
         ),
-        voice_en="paranoid; asks 'what if X is null/malicious/concurrent'",
+        voice_en="paranoid and empathetic; asks 'what if X is null/malicious' "
+                 "and 'how does this read to someone new?'",
         foil_en="Optimizer",
     ),
     Sage(
@@ -122,74 +127,46 @@ SAGES: list[Sage] = [
         glyph_color=(255, 236, 39),
         name_en="Optimizer",
         expertise_en=(
-            "You defend speed, memory efficiency, and scalability under real "
-            "load. You attack beautiful but slow code, premature optimization "
-            "claims, and decisions made without measurement."
+            "You defend speed, memory efficiency, token-budget discipline, "
+            "and scalability under real load. You attack beautiful but slow "
+            "code, premature optimization claims, and decisions made without "
+            "measurement or profiling evidence."
         ),
         voice_en="data-driven; demands numbers, benchmarks, and profiling evidence",
         foil_en="Guardian",
     ),
     Sage(
-        id="embajador",
-        role="Embajador (UX/DX)",
-        archetype="Berserker",
-        sprite_color=(171, 82, 54),
-        accent_color=(255, 0, 77),
-        glyph_color=(255, 119, 168),
-        name_en="Ambassador",
-        expertise_en=(
-            "You defend API clarity, developer ergonomics, and end-user "
-            "experience. You attack cryptic errors, opaque abstractions, "
-            "and code that only the author understands."
-        ),
-        voice_en="empathetic; asks 'how does this read to someone new?'",
-        foil_en="Architect",
-    ),
-]
-
-
-VOICE_ONLY_SAGES: list[Sage] = [
-    Sage(
-        id="disenador",
-        role="Diseñador",
-        archetype="Oráculo del Arte",
-        sprite_color=(0, 0, 0),
-        accent_color=(0, 0, 0),
-        glyph_color=(0, 0, 0),
-        name_en="Designer",
-        expertise_en=(
-            "You defend visual hierarchy, color harmony, typography, layout, "
-            "whitespace, and the emotional response a user has when they "
-            "encounter the artifact. You attack ugly UIs, dense unscannable "
-            "layouts, cargo-culted design systems, and 'looks fine to me' "
-            "developer aesthetics."
-        ),
-        voice_en="perceptive; references contrast, rhythm, grid systems, "
-                 "and how the eye actually moves across a screen",
-        foil_en="Optimizer",
-    ),
-    Sage(
-        id="estratega",
-        role="Estratega",
+        id="juez",
+        role="Juez",
         archetype="Vidente",
-        sprite_color=(0, 0, 0),
-        accent_color=(0, 0, 0),
-        glyph_color=(0, 0, 0),
-        name_en="Strategist",
+        sprite_color=(171, 82, 54),
+        accent_color=(255, 119, 168),
+        glyph_color=(255, 220, 80),
+        name_en="Judge",
         expertise_en=(
-            "You defend the question 'does this matter?'. You attack "
+            "You are the arbiter and strategist of the council. You defend "
+            "the question 'does this matter to the user?'. You attack "
             "technically correct work on the wrong problem, features nobody "
-            "asked for, optimization of dead code paths, and tactical wins "
-            "that erode the strategic position."
+            "asked for, and tactical wins that erode the strategic position. "
+            "You synthesize the six sages' debate into a prioritized plan "
+            "and cast the deciding vote when the council is deadlocked."
         ),
-        voice_en="patient; asks 'who is the user', 'what changes if we "
-                 "don't do this', 'is this on the critical path'",
-        foil_en="Modernizer",
+        voice_en="patient and decisive; asks 'who is the user', 'what "
+                 "changes if we don't do this', 'is this on the critical path'",
+        foil_en="Simplifier",
     ),
 ]
 
 
-ALL_SAGES: list[Sage] = SAGES + VOICE_ONLY_SAGES
+# Voice-only sages have been retired: their expertise has been absorbed
+# into the seated sages. Estructurador absorbs Architect + Designer.
+# Guardian absorbs Guardian + Ambassador. Juez absorbs Judge + Strategist.
+VOICE_ONLY_SAGES: list[Sage] = []
+
+ALL_SAGES: list[Sage] = SAGES
+
+# The six sages that participate in the debate (Juez only arbitrates / synthesizes).
+DEBATE_SAGES: list[Sage] = [s for s in SAGES if s.id != "juez"]
 
 
 def by_id(sage_id: str) -> Sage:

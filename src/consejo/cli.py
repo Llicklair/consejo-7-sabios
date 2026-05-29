@@ -160,6 +160,17 @@ def _error_missing_claude_cli() -> str:
 
 
 def main() -> None:
+    if hasattr(sys.stdout, "reconfigure"):
+        try:
+            sys.stdout.reconfigure(encoding="utf-8")
+        except Exception:
+            pass
+    if hasattr(sys.stderr, "reconfigure"):
+        try:
+            sys.stderr.reconfigure(encoding="utf-8")
+        except Exception:
+            pass
+
     parser = argparse.ArgumentParser(
         prog="consejo",
         description="El Consejo de los 7 Sabios — debate técnico estructurado.",
@@ -175,10 +186,10 @@ def main() -> None:
              "If set, overrides positional.",
     )
     parser.add_argument("--repo", type=Path, default=Path.cwd(),
-                        help="Ruta del repo a analizar (default: cwd)")
+                    help="Ruta del repo a analizar (default: cwd)")
     parser.add_argument("--mode", choices=["mock", "real", "claude-code"], default="mock",
                         help="mock = canned proposals · real = anthropic SDK · "
-                             "claude-code = 7+2 subagents via Claude Code CLI (no API key)")
+                             "claude-code = 7 subagents via Claude Code CLI (no API key)")
     parser.add_argument("--cc-model", default="opus",
                         help="Model for --mode claude-code (sonnet|opus|alias). "
                              "Default: opus (deeper debate; cheaper switch: --cc-model sonnet)")
@@ -228,7 +239,8 @@ def main() -> None:
 
     if args.mode == "real":
         try:
-            import anthropic  # noqa
+            import importlib
+            importlib.import_module("anthropic")
         except ImportError:
             parser.error(_error_missing_anthropic_sdk())
         import os

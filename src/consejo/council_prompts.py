@@ -21,8 +21,8 @@ from .schemas import (
 
 def _sage_system_prompt(sage: Sage) -> str:
     return (
-        f"You are the **{sage.name_en}**, one of nine sages convened to review a "
-        f"software project IN DEPTH. The other eight sages debate beside you; "
+        f"You are the **{sage.name_en}**, one of seven sages convened to review a "
+        f"software project IN DEPTH. The other five sages debate beside you; "
         f"their views often clash with yours — that friction is by design.\n\n"
         f"## Your expertise\n{sage.expertise_en}\n\n"
         f"## Your voice\n{sage.voice_en}\n\n"
@@ -60,10 +60,10 @@ def _sage_system_prompt(sage: Sage) -> str:
 
 def _judge_system_prompt() -> str:
     return (
-        "You are the **Judge** of the Council of Sages. The roster has nine "
-        "voices: 7 visible sages (Architect, Conservative, Modernizer, "
-        "Simplifier, Guardian, Optimizer, Ambassador) and 2 voice-only sages "
-        "(Designer, Strategist). Synthesize their work into TWO outputs:\n\n"
+        "You are the **Judge** of the Council of Sages. The roster has seven "
+        "voices: 6 debate sages (Structurer, Conservative, Modernizer, "
+        "Simplifier, Guardian, Optimizer) and you — the Judge — who arbitrates "
+        "and synthesizes. Synthesize their work into TWO outputs:\n\n"
         "  1. **`tasks`** — a tactical plan the user can execute. These are "
         "the `code-fix` items mostly, plus `future-feature` items with "
         "`horizon=now`.\n"
@@ -182,9 +182,9 @@ def _build_judge_user_message(
 
 def _sage_critique_system_prompt(sage: Sage) -> str:
     return (
-        f"You are the **{sage.name_en}**, one of nine sages convened to review a "
+        f"You are the **{sage.name_en}**, one of seven sages convened to review a "
         f"software project. You have already proposed your own items in round 1. "
-        f"Now in round 2, you read the proposals submitted by the OTHER eight "
+        f"Now in round 2, you read the proposals submitted by the OTHER five "
         f"sages and cross-examine them from your axis.\n\n"
         f"## Your expertise\n{sage.expertise_en}\n\n"
         f"## Your voice\n{sage.voice_en}\n\n"
@@ -236,7 +236,7 @@ def _build_critique_user_message(
 
 def _consensus_system_prompt(sage: Sage) -> str:
     return (
-        f"You are the **{sage.name_en}**, one of nine sages in a TURN-BY-TURN "
+        f"You are the **{sage.name_en}**, one of seven sages in a TURN-BY-TURN "
         f"conversational debate. The goal is UNANIMOUS consensus on a plan — "
         f"but a fast unanimous yes is INDISTINGUISHABLE from groupthink, and "
         f"groupthink fails the council. Real consensus survives challenge.\n\n"
@@ -293,23 +293,30 @@ def _consensus_system_prompt(sage: Sage) -> str:
 
 
 def _format_transcript_for_turn(
-    transcript: list[dict], max_msg_chars: int = 800,
+    transcript: list[dict], max_msg_chars: int = 800, keep_messages_count: int = 12
 ) -> str:
-    """Render the transcript compactly. Truncate long messages but keep votes."""
+    """Render the transcript compactly. Truncate long messages but keep votes.
+
+    To prevent token bloat, only the last `keep_messages_count` turns retain their
+    full messages; older turns only retain their vote and objection metadata.
+    """
     if not transcript:
         return "(empty — you speak first)"
     lines = []
-    for e in transcript:
-        msg = e.get("message", "")
-        if len(msg) > max_msg_chars:
-            msg = msg[:max_msg_chars] + "…[truncated]"
+    msg_cutoff_idx = len(transcript) - keep_messages_count
+    for idx, e in enumerate(transcript):
         v = e.get("vote", {}) or {}
         sig = "SIGNED" if v.get("signed") else "BLOCK"
         objs = v.get("objections", []) or []
         objs_str = f" objections={objs}" if objs else ""
-        lines.append(
-            f"--- turn {e['turn']} · {e['sage_id']} · {sig}{objs_str} ---\n  {msg}"
-        )
+        header = f"--- turn {e['turn']} · {e['sage_id']} · {sig}{objs_str} ---"
+        if idx >= msg_cutoff_idx:
+            msg = e.get("message", "")
+            if len(msg) > max_msg_chars:
+                msg = msg[:max_msg_chars] + "…[truncated]"
+            lines.append(f"{header}\n  {msg}")
+        else:
+            lines.append(f"{header} (message omitted)")
     return "\n".join(lines)
 
 

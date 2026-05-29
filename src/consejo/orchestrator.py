@@ -28,7 +28,7 @@ from typing import TypedDict
 
 from .backends import build_backend
 from .driver_protocol import set_driver
-from .sages import ALL_SAGES, SAGES, Sage
+from .sages import ALL_SAGES, DEBATE_SAGES, SAGES, Sage
 from .states import MAX_DEBATE_ROUNDS, EventBus, State, StateEvent
 from .translator import translate_atasco_to_en, translate_plan_to_es
 
@@ -118,23 +118,26 @@ def scan_project(repo: Path, max_files: int = 80,
 
 
 SAGE_KEYWORDS: dict[str, list[str]] = {
-    "arquitecto":    ["class ", "interface", "abstract", "import ", "from ",
-                      "module", "boundary", "decoupl", "layer"],
+    # Estructurador absorbs Architect + Designer keywords
+    "estructurador": ["class ", "interface", "abstract", "import ", "from ",
+                      "module", "boundary", "decoupl", "layer",
+                      "color", "style", "format", "layout", "render",
+                      "draw", "pixel", "frame", "RGBA", "ImageDraw"],
     "conservador":   ["test", "version", "deprecat", "compat", "lock",
                       "pin ", "migration", "fragile", "rollback"],
     "modernizador":  ["async ", "await ", "typing", "TypeAlias", "match ",
                       "@override", "Protocol", "PEP", "type[", "| None"],
     "simplificador": ["TODO", "FIXME", "deprecated", "unused", "helper",
                       "wrapper", "duplicate", "legacy"],
+    # Guardian absorbs Guardian + Ambassador keywords
     "guardian":      ["except", "validate", "sanitize", "auth", "permission",
-                      "raise ", "security", "injection", "shell=", "eval("],
+                      "raise ", "security", "injection", "shell=", "eval(",
+                      "argparse", "help=", "error", "log", "ValueError",
+                      "docs/", "CLI", "click", "typer"],
     "optimizador":   ["cache", "perf", "benchmark", "memo", "lazy",
                       "expensive", " for ", "while ", "O(n", "Image.new"],
-    "embajador":     ["argparse", "help=", "README", "error", "log",
-                      "ValueError", "docs/", "CLI", "click", "typer"],
-    "disenador":     ["color", "style", "format", "layout", "render",
-                      "draw", "pixel", "frame", "RGBA", "ImageDraw"],
-    "estratega":     ["README", "ARCHITECTURE", "vision", "scope",
+    # Juez absorbs Strategist keywords for briefing
+    "juez":          ["README", "ARCHITECTURE", "vision", "scope",
                       "roadmap", "user", "stakeholder", "milestone"],
 }
 
@@ -155,8 +158,8 @@ def build_briefing(files: list[tuple[str, str]],
     y se queda con los top N. Sin sage o sin keywords: slice alfabético.
 
     Stops appending files once the assembled briefing would exceed
-    `max_aggregate_bytes`. With 9 sages × 25 files × 1200 chars the
-    worst-case payload was ~270KB per debate round; the cap bounds it.
+    `max_aggregate_bytes`. With 7 sages × 25 files × 1200 chars the
+    worst-case payload was ~210KB per debate round; the cap bounds it.
     """
     out: list[str] = ["# Project briefing", ""]
     keywords = SAGE_KEYWORDS.get(for_sage.id) if for_sage else None
@@ -539,7 +542,7 @@ async def run_council(atasco: str, repo: Path, bus: EventBus,
     vuelve a ES para el reporte (con el original EN preservado).
     """
     rng_seed = seed if seed is not None else random.randint(0, 99999)
-    n_sages = len(SAGES)
+    n_sages = len(DEBATE_SAGES)  # Juez does not take debate turns
 
     async def emit(state: State, **kw) -> None:
         await bus.publish(StateEvent(state=state, **kw))
@@ -564,11 +567,9 @@ async def run_council(atasco: str, repo: Path, bus: EventBus,
         prev_signed: set[int] = set()
 
         async def _on_turn(sage, turn_num, round_num, entry, current_plan, current_votes):
-            # Build the current vote state across all VISIBLE sages (SAGES).
-            # Voice-only sages still speak but do not occupy seats, so they
-            # don't appear in the animator. Vote state is REPLACED each turn,
-            # not accumulated — a sage that signs then later blocks must lose
-            # their seal in the animation.
+            # Build the current vote state across all seated DEBATE_SAGES.
+            # Juez does not debate, so skip it; vote state is REPLACED each
+            # turn so a sage that flips block→sign→block loses their seal.
             currently_signed: list[int] = []
             for i, s in enumerate(SAGES):
                 v = current_votes.get(s.id, {}) or {}
@@ -585,11 +586,11 @@ async def run_council(atasco: str, repo: Path, bus: EventBus,
                 "speaker": sage.id,
                 "speaker_idx": speaker_idx,
                 "plan_size": len(current_plan),
-                "voice_only": speaker_idx == -1,
+                "voice_only": False,
             })
 
         plan = await consensus_dialogue(
-            atasco, repo, list(ALL_SAGES),
+            atasco, repo, list(DEBATE_SAGES),
             max_rounds=consensus_max_rounds,
             min_rounds=consensus_min_rounds,
             model=cc_model,
@@ -697,7 +698,7 @@ async def run_council(atasco: str, repo: Path, bus: EventBus,
     else:
         atasco_en = atasco
     files = scan_project(repo)
-    briefings = {s.id: build_briefing(files, for_sage=s) for s in SAGES}
+    briefings = {s.id: build_briefing(files, for_sage=s) for s in DEBATE_SAGES}
     await asyncio.sleep(6.0 / speed)
 
     # === DEBATE rounds ===
@@ -712,7 +713,7 @@ async def run_council(atasco: str, repo: Path, bus: EventBus,
 
         if r == 1:
             # Round 1: cada sabio propone
-            for s in SAGES:
+            for s in DEBATE_SAGES:
                 if mode == "mock":
                     props = _mock_propose(s, r, rng_seed, scanned_files=files)
                 else:
@@ -720,7 +721,7 @@ async def run_council(atasco: str, repo: Path, bus: EventBus,
                 all_proposals.extend(props)
         else:
             # Round 2+: cada sabio firma o propone enmiendas
-            for s in SAGES:
+            for s in DEBATE_SAGES:
                 if s.id in signed_ids:
                     continue
                 if mode == "mock":
@@ -737,7 +738,7 @@ async def run_council(atasco: str, repo: Path, bus: EventBus,
                 signatures[s.id] = rec
                 if rec.signed:
                     signed_ids.add(s.id)
-                    new_signs_idx.append(SAGES.index(s))
+                    new_signs_idx.append(SAGES.index(s) if s in SAGES else -1)
                 else:
                     all_proposals.extend(rec.amendments)
 
@@ -746,13 +747,14 @@ async def run_council(atasco: str, repo: Path, bus: EventBus,
             round_num=r,
             payload={
                 "signed_this_round": new_signs_idx,
-                "total_signed": [i for i, s in enumerate(SAGES) if s.id in signed_ids],
+                "total_signed": [i for i, s in enumerate(SAGES)
+                                  if s.id in signed_ids and s in DEBATE_SAGES],
             },
         )
         await asyncio.sleep(3.5 / speed)
 
         # Convergencia: todos firmados
-        if len(signed_ids) == n_sages:
+        if len(signed_ids) >= n_sages:
             break
 
     # === JUEZ ===
