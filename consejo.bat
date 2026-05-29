@@ -14,18 +14,21 @@ if not exist ".venv\Scripts\python.exe" (
 echo.
 echo  Convocando al Consejo de los 7 Sabios
 echo  -------------------------------------
-echo  Se abren DOS ventanas: el debate (animado) y el watcher en vivo.
+echo  Una sola ventana: arriba la animacion, abajo el debate en vivo.
 echo.
 
-REM Ventana del watcher: sigue el debate formateado, turno a turno.
-start "Consejo - debate en vivo" cmd /c "%~dp0watch-debate.bat"
+REM Una ventana de Windows Terminal con panel dividido: animacion arriba,
+REM watcher en vivo abajo (35%%). Render fluido, sin el flicker del cmd legacy.
+REM Si no esta wt.exe, cae a dos ventanas cmd separadas.
+where wt.exe >nul 2>nul && goto :wt
+goto :fallback
 
-REM El debate (con animacion) corre en Windows Terminal -> render fluido,
-REM sin el parpadeo del cmd.exe legacy. Si no esta wt.exe, cae a cmd normal.
-where wt.exe >nul 2>nul
-if %errorlevel%==0 (
-    wt.exe --title "Consejo" cmd /k "%~dp0_run-debate.bat"
-) else (
-    echo  [aviso] Windows Terminal no encontrado: uso cmd (la animacion parpadea).
-    start "Consejo - debate" cmd /k "%~dp0_run-debate.bat"
-)
+:wt
+wt.exe new-tab --title "Consejo" cmd /k "%~dp0_run-debate.bat" ; split-pane -H --size 0.35 cmd /k "%~dp0watch-debate.bat"
+goto :eof
+
+:fallback
+echo  [aviso] Windows Terminal no encontrado: uso dos ventanas cmd (la animacion parpadea).
+start "Consejo - debate en vivo" cmd /c "%~dp0watch-debate.bat"
+start "Consejo - debate" cmd /k "%~dp0_run-debate.bat"
+goto :eof
