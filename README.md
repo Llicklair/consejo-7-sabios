@@ -54,15 +54,37 @@ Cada sesión, los 7 se sientan **aleatoriamente** alrededor de la mesa.
 
 ### Launch desde VSCode / Cursor
 
-Hay `tasks.json` con 4 tareas listas. `Ctrl+Shift+B` lanza la default (mock
-animado); `Ctrl+Shift+P > Run Task` deja elegir entre:
+`Ctrl+Shift+B` está atado (vía `keybindings.json` de usuario) a la tarea
+**"Consejo: debatir el workspace abierto"**, que lanza el debate real en una
+ventana **externa** — ver [`/invoco-al-consejo`](#invoco-al-consejo--lanzamiento-externo-recomendado) abajo.
+El `tasks.json` del proyecto tiene además 4 tareas de desarrollo en
+`Ctrl+Shift+P > Run Task`:
 
 - **Consejo: invocar (mock, animado)** — sin API, animación TUI
 - **Consejo: invocar (claude-code, animado, 2 rondas)** — debate real via Claude Code CLI
 - **Consejo: invocar (mock, headless)** — solo logs
 - **Consejo: tests** — pytest
 
-La tarea abre un nuevo terminal integrado y pide el atasco interactivamente.
+Estas 4 tareas de desarrollo corren en el terminal integrado de VSCode.
+
+### `/invoco-al-consejo` — lanzamiento externo (recomendado)
+
+`Ctrl+Shift+B` ya **no** corre el debate dentro de VSCode. Lanza `consejo.bat`
+en una **ventana cmd externa**, de modo que el debate **sobrevive si VSCode se
+actualiza o crashea** (correrlo en el terminal integrado lo mataba a media
+sesión). Además abre **una segunda ventana** que sigue el debate en vivo, turno
+a turno y formateado (`watch-debate.ps1`, espera sola a que arranque el debate).
+
+- **Debate:** opus, `--consensus-rounds 8 --consensus-min-rounds 5`,
+  `--json-schema` OFF (los sabios leen el repo de verdad).
+- **Plan final:** `consejo-report-*.md` en el cwd — incluye la sección
+  **"Puntos de impacto"** con los archivos que toca cada tarea (handoff directo
+  a quien implemente).
+- **Log en vivo:** `consejo-debate-<timestamp>.jsonl` (lo que sigue la 2ª ventana).
+
+Lanzamiento manual equivalente (sin VSCode): doble-clic en **`consejo.bat`**
+(abre el watcher automáticamente). Para seguir un debate ya en curso desde otra
+terminal: doble-clic en **`watch-debate.bat`**.
 
 ### Launch desde scripts
 

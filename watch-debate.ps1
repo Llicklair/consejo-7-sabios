@@ -6,12 +6,22 @@
 $ErrorActionPreference = "Stop"
 $OutputEncoding = [System.Text.Encoding]::UTF8
 
-$file = Get-ChildItem -Path (Join-Path $PSScriptRoot "consejo-debate-*.jsonl") |
-    Sort-Object LastWriteTime | Select-Object -Last 1
-
-if (-not $file) {
-    Write-Host "No hay ningún consejo-debate-*.jsonl todavía. Lanza el Consejo primero." -ForegroundColor Yellow
-    exit 1
+$pattern = Join-Path $PSScriptRoot "consejo-debate-*.jsonl"
+$file = $null
+$waited = 0
+while (-not $file) {
+    $file = Get-ChildItem -Path $pattern -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime | Select-Object -Last 1
+    if ($file) { break }
+    if ($waited -eq 0) {
+        Write-Host "Esperando a que arranque el debate (consejo-debate-*.jsonl)..." -ForegroundColor Yellow
+    }
+    Start-Sleep -Seconds 1
+    $waited++
+    if ($waited -gt 300) {
+        Write-Host "No apareció ningún debate en 5 min. Saliendo." -ForegroundColor Red
+        exit 1
+    }
 }
 
 Write-Host "Siguiendo: $($file.Name)  (Ctrl+C para salir)`n" -ForegroundColor Cyan
