@@ -87,6 +87,7 @@ async def consensus_dialogue(
     min_rounds: int = 1,
     model: str = "sonnet",
     on_turn=None,
+    repo_brief: str = "",
 ) -> dict:
     """Round-robin turn-by-turn dialogue until all sages sign the same plan.
 
@@ -148,6 +149,7 @@ async def consensus_dialogue(
                 atasco, repo, sage, transcript, plan,
                 round_num=r, max_rounds=max_rounds,
                 turn_in_round=i, total_sages=len(sages),
+                repo_brief=repo_brief,
             )
             _t0 = time.monotonic()
             try:

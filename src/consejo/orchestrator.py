@@ -533,7 +533,10 @@ async def run_council(atasco: str, repo: Path, bus: EventBus,
                       consensus_mode: bool = False,
                       consensus_max_rounds: int = 20,
                       consensus_min_rounds: int = 1,
-                      backend: str = "claude-code") -> dict:
+                      backend: str = "claude-code",
+                      analysis_enabled: bool = True,
+                      analysis_max_batches: int | None = None,
+                      analysis_model: str = "sonnet") -> dict:
     """Ejecuta el consejo completo y empuja eventos al bus para el animator.
 
     `atasco_lang`: idioma del atasco del usuario ('es' o 'en'). Si es 'es' y
@@ -565,6 +568,41 @@ async def run_council(atasco: str, repo: Path, bus: EventBus,
             verify_plan_claims,
         )
         driver = build_backend(backend)
+
+        # === P1: pasada de análisis de cobertura COMPLETA ===
+        # Lee TODOS los archivos (resumiendo desde el ledger persistente, así
+        # solo lo nuevo/cambiado cuesta), escribe el mapa completo a .consejo/
+        # y construye un brief acotado que alimenta CADA turno del debate — para
+        # que los sabios argumenten sobre todo el repo, no un ojo de cerrajero.
+        repo_brief = ""
+        if analysis_enabled:
+            from .analysis import (
+                coverage_summary,
+                enumerate_units,
+                render_repo_brief,
+                render_repo_map,
+                run_analysis_pass,
+            )
+            try:
+                ledger = await run_analysis_pass(
+                    driver, repo, model=analysis_model,
+                    max_batches=analysis_max_batches,
+                )
+                a_units = enumerate_units(repo)
+                repo_brief = render_repo_brief(ledger, a_units)
+                summ = coverage_summary(ledger, a_units)
+                try:
+                    map_path = repo / ".consejo" / "repo-map.md"
+                    map_path.parent.mkdir(parents=True, exist_ok=True)
+                    map_path.write_text(
+                        render_repo_map(ledger, a_units), encoding="utf-8")
+                except OSError:
+                    pass
+                print(f"[analysis] brief listo: {summ['covered']}/{summ['total']} "
+                      f"archivos, {summ['concerns']} concerns", file=sys.stderr)
+            except Exception as e:
+                print(f"[analysis-stage-fail] {str(e)[:400]}", file=sys.stderr)
+
         await asyncio.sleep(2.0 / speed)
 
         prev_signed: set[int] = set()
@@ -598,6 +636,7 @@ async def run_council(atasco: str, repo: Path, bus: EventBus,
             min_rounds=consensus_min_rounds,
             model=cc_model,
             on_turn=_on_turn,
+            repo_brief=repo_brief,
         )
         plan["atasco_es"] = atasco_es_original
         plan["atasco_en"] = atasco

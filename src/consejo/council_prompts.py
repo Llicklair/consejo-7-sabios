@@ -336,14 +336,24 @@ def _consensus_turn_user_message(
     atasco: str, repo: Path, sage: Sage,
     transcript: list[dict], plan: list[dict],
     round_num: int, max_rounds: int, turn_in_round: int, total_sages: int,
+    repo_brief: str = "",
 ) -> str:
     plan_repr = json.dumps(plan, indent=2) if plan else "(empty — propose initial items)"
+    brief_block = (
+        f"<repo_analysis>\n"
+        f"A prior pass read EVERY file in the repo and produced this map. It is "
+        f"your ground truth — propose from it instead of guessing. Use "
+        f"Read/Glob/Grep (max 3) only to verify a specific line.\n\n"
+        f"{repo_brief}\n"
+        f"</repo_analysis>\n\n"
+    ) if repo_brief else ""
     return (
         f"<atasco>{atasco}</atasco>\n"
         f"<repo>{repo.resolve()}</repo>\n"
         f"<round>{round_num}/{max_rounds}</round>\n"
         f"<turn_in_round>{turn_in_round}/{total_sages}</turn_in_round>\n"
         f"<your_id>{sage.id}</your_id>\n\n"
+        f"{brief_block}"
         f"<current_plan>\n{plan_repr}\n</current_plan>\n\n"
         f"<transcript>\n{_format_transcript_for_turn(transcript)}\n</transcript>\n\n"
         f"It is your turn. You may use Read/Glob/Grep (max 3 calls) ONLY to "

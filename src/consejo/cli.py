@@ -50,6 +50,8 @@ def _build_driver(atasco: str, repo: Path, mode: str, speed: float,
                   consensus_max_rounds: int = 20,
                   consensus_min_rounds: int = 1,
                   backend: str = "claude-code",
+                  analysis_enabled: bool = True,
+                  analysis_max_batches: int | None = None,
                   out_holder: dict | None = None):
     """Devuelve una corutina (bus) -> None lista para pasar al animator.
 
@@ -74,6 +76,8 @@ def _build_driver(atasco: str, repo: Path, mode: str, speed: float,
             consensus_max_rounds=consensus_max_rounds,
             consensus_min_rounds=consensus_min_rounds,
             backend=backend,
+            analysis_enabled=analysis_enabled,
+            analysis_max_batches=analysis_max_batches,
         )
         execution = None
         if execute_mode == "auto" and await is_git_repo(repo):
@@ -102,6 +106,8 @@ async def _run_headless(atasco: str, repo: Path, mode: str, speed: float,
                         consensus_max_rounds: int = 20,
                         consensus_min_rounds: int = 1,
                         backend: str = "claude-code",
+                        analysis_enabled: bool = True,
+                        analysis_max_batches: int | None = None,
                         out_holder: dict | None = None) -> Path:
     bus = EventBus()
     driver = _build_driver(atasco, repo, mode, speed, target_rounds, seed,
@@ -112,6 +118,8 @@ async def _run_headless(atasco: str, repo: Path, mode: str, speed: float,
                            consensus_max_rounds=consensus_max_rounds,
                            consensus_min_rounds=consensus_min_rounds,
                            backend=backend,
+                           analysis_enabled=analysis_enabled,
+                           analysis_max_batches=analysis_max_batches,
                            out_holder=out_holder)
 
     async def consume_print() -> None:
@@ -234,6 +242,17 @@ def main() -> None:
                              "su firma está suprimida). NO lo subas para forzar "
                              "profundidad: produce rondas muertas, no mejor "
                              "debate — la profundidad va en el rigor de firma.")
+    parser.add_argument("--no-analysis", action="store_true",
+                        help="Salta la pasada de análisis de cobertura completa "
+                             "previa al debate (P1). Por defecto SÍ se ejecuta: "
+                             "lee TODO el repo (resumible desde .consejo/) y "
+                             "alimenta a los sabios. Úsalo para un debate rápido "
+                             "sin el coste del análisis.")
+    parser.add_argument("--analysis-batches", type=int, default=None,
+                        help="Cota la pasada de análisis a N lotes por sesión "
+                             "(resto pendiente, resumible). Para cubrir un repo "
+                             "grande en trozos acotados a lo largo de varias "
+                             "sesiones.")
     args = parser.parse_args()
 
     atasco = args.atasco_en if args.atasco_en else args.atasco
@@ -296,6 +315,8 @@ def main() -> None:
             consensus_max_rounds=args.consensus_rounds,
             consensus_min_rounds=args.consensus_min_rounds,
             backend=args.backend,
+            analysis_enabled=not args.no_analysis,
+            analysis_max_batches=args.analysis_batches,
             out_holder=out_holder,
         ))
     else:
@@ -309,6 +330,8 @@ def main() -> None:
                                consensus_max_rounds=args.consensus_rounds,
                                consensus_min_rounds=args.consensus_min_rounds,
                                backend=args.backend,
+                               analysis_enabled=not args.no_analysis,
+                               analysis_max_batches=args.analysis_batches,
                                out_holder=out_holder)
         asyncio.run(animate(
             speed=args.speed,
