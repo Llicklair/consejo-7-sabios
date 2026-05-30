@@ -223,13 +223,17 @@ def main() -> None:
                         help="Modo conversacional turn-by-turn: los 9 sabios "
                              "debaten en ronda-robin hasta unanimidad o cap. "
                              "Solo aplica con --mode claude-code.")
-    parser.add_argument("--consensus-rounds", type=int, default=20,
-                        help="Cap de rondas en --consensus (default: 20). "
-                             "Cada ronda son 9 turnos (1 por sabio).")
-    parser.add_argument("--consensus-min-rounds", type=int, default=1,
-                        help="Floor de rondas mínimas (default: 1). Fuerza "
-                             "al consejo a seguir aunque firmen todos antes. "
-                             "Sube a 5+ si convergen demasiado rápido.")
+    parser.add_argument("--consensus-rounds", type=int, default=8,
+                        help="Techo de rondas en --consensus (default: 8). "
+                             "El debate PARA antes si los sabios firman por "
+                             "unanimidad. Cada ronda son 6 turnos (1 por sabio).")
+    parser.add_argument("--consensus-min-rounds", type=int, default=2,
+                        help="Piso de rondas mínimas (default: 2). La unanimidad "
+                             "no corta el debate antes de este piso. min=2 deja "
+                             "1 ronda de fricción real (la ronda 1 solo propone, "
+                             "su firma está suprimida). NO lo subas para forzar "
+                             "profundidad: produce rondas muertas, no mejor "
+                             "debate — la profundidad va en el rigor de firma.")
     args = parser.parse_args()
 
     atasco = args.atasco_en if args.atasco_en else args.atasco

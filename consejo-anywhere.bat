@@ -29,10 +29,10 @@ echo  --------------------------------------
 echo  Tema:    %TEMA%
 echo  Repo:    %CD%
 echo  Modo:    claude-code . consenso . opus
-echo  Rondas:  min 5, max 20 (duracion 60-120 min)
+echo  Rondas:  para al firmar (min 2, max 8)
 echo.
 
-"%CONSEJO_EXE%" "%TEMA%" --repo "%CD%" --mode claude-code --consensus --consensus-rounds 20 --consensus-min-rounds 5 --cc-model opus --speed 0.3
+"%CONSEJO_EXE%" "%TEMA%" --repo "%CD%" --mode claude-code --consensus --consensus-rounds 8 --consensus-min-rounds 2 --cc-model opus --speed 0.3
 
 echo.
 echo  Consejo finalizado. Pulsa una tecla para cerrar.

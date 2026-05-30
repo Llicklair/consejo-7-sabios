@@ -559,7 +559,11 @@ async def run_council(atasco: str, repo: Path, bus: EventBus,
     # do their own repo reading and there is no multi-round sign/amend loop.
     # The ANALIZANDO phase covers the time the subagents work in parallel.
     if mode == "claude-code" and consensus_mode:
-        from .consensus import consensus_dialogue, post_consensus_vision
+        from .consensus import (
+            consensus_dialogue,
+            post_consensus_vision,
+            verify_plan_claims,
+        )
         driver = build_backend(backend)
         await asyncio.sleep(2.0 / speed)
 
@@ -599,6 +603,14 @@ async def run_council(atasco: str, repo: Path, bus: EventBus,
         plan["atasco_en"] = atasco
         await asyncio.sleep(2.0 / speed)
         await emit(State.JUEZ)
+        # Verification pass: before the judge's vision, adversarially fact-check
+        # every agreed task's claims against the real repo. This is the gate the
+        # council lacked — quantitative claims the debate asserted but never
+        # measured get caught here and flagged/demoted in the report.
+        try:
+            plan = await verify_plan_claims(driver, repo, plan, model=cc_model)
+        except Exception as e:
+            print(f"[verify-stage-fail] {str(e)[:400]}", file=sys.stderr)
         if plan.get("unanimous"):
             try:
                 vision = await post_consensus_vision(
@@ -811,11 +823,33 @@ def render_plan_markdown(plan: dict, execution: dict | None = None) -> str:
         "",
         "## Plan priorizado",
         "",
-        "| # | Tarea | Sabios | Discrepó (resuelto) | Blast | Auto |",
-        "|---|-------|--------|---------------------|-------|------|",
+        "| # | Tarea | Sabios | Discrepó (resuelto) | Blast | Verif. | Auto |",
+        "|---|-------|--------|---------------------|-------|--------|------|",
+    ]
+
+    def _verif_mark(t: dict) -> str:
+        v = (t.get("verification") or {}).get("verdict")
+        return {
+            "solid": "✅ medido",
+            "weakened": "⚠️ parcial",
+            "refuted": "❌ refutado",
+        }.get(v, "—")
+
+    def _cell(s: str) -> str:
+        """Sanea una celda de tabla markdown: sin pipes ni saltos de línea."""
+        return (str(s or "")).replace("|", "\\|").replace("\n", " ").strip()
+
+    all_tasks = plan["tasks"]
+    refuted_tasks = [
+        t for t in all_tasks
+        if (t.get("verification") or {}).get("verdict") == "refuted"
+    ]
+    actionable = [
+        t for t in all_tasks
+        if (t.get("verification") or {}).get("verdict") != "refuted"
     ]
     has_any_dissent = False
-    for t in plan["tasks"]:
+    for t in actionable:
         sages = ", ".join(t.get("supporting_sages", []))
         dissent = t.get("dissented_at_some_point") or []
         dissent_str = ", ".join(dissent) if dissent else "—"
@@ -824,7 +858,7 @@ def render_plan_markdown(plan: dict, execution: dict | None = None) -> str:
         auto = "✅" if t.get("auto_executable") else "⛔"
         lines.append(
             f"| {t['priority']} | **{t['title']}** | {sages} | "
-            f"{dissent_str} | `{t['blast_radius']}` | {auto} |"
+            f"{dissent_str} | `{t['blast_radius']}` | {_verif_mark(t)} | {auto} |"
         )
     if has_any_dissent:
         lines += ["",
@@ -832,8 +866,55 @@ def render_plan_markdown(plan: dict, execution: dict | None = None) -> str:
                   "alguna ronda y luego firmaron tras enmiendas — la textura "
                   "del debate aunque el resultado final sea unánime._"]
 
+    # Tareas refutadas por la verificación: su premisa fáctica no resistió el
+    # contraste con el código. Se sacan del plan accionable y se muestran aparte
+    # para ser honestos sobre lo que el debate afirmó sin medir.
+    if refuted_tasks:
+        lines += ["", "## ❌ Refutadas por la verificación", "",
+                  "_Estas tareas se apoyaban en afirmaciones que NO resistieron "
+                  "el contraste con el código real. Fuera del plan accionable._",
+                  ""]
+        for t in refuted_tasks:
+            ver = t.get("verification") or {}
+            lines.append(f"- **{t['title']}** — {ver.get('note', '')}")
+
+    # Detalle de verificación: cada afirmación → comando → lo observado.
+    if any(t.get("verification") for t in all_tasks):
+        lines += ["", "## Verificación de afirmaciones", "",
+                  "_Cada cifra del debate recontrastada contra el repo por un "
+                  "verificador con presupuesto de tools SIN límite. '❓' = no "
+                  "comprobable con Read/Glob/Grep (no es un aprobado)._", ""]
+        for t in all_tasks:
+            ver = t.get("verification")
+            if not ver:
+                continue
+            claims = ver.get("claims") or []
+            if not claims and not ver.get("note"):
+                continue
+            lines.append(f"### {_verif_mark(t)} · {t['title']}")
+            if ver.get("note"):
+                lines.append(f"_{ver['note']}_")
+            if claims:
+                lines += ["",
+                          "| Afirmación | Comando | Observado | Veredicto |",
+                          "|------------|---------|-----------|-----------|"]
+                sym = {"verified": "✅", "refuted": "❌", "unverifiable": "❓"}
+                for c in claims:
+                    v = c.get("verdict", "")
+                    lines.append(
+                        f"| {_cell(c.get('claim'))} | `{_cell(c.get('command') or '—')}` "
+                        f"| {_cell(c.get('observed') or '—')} | {sym.get(v, '')} {v} |"
+                    )
+            missing = [fe.get("path") for fe in (ver.get("files_exist") or [])
+                       if fe.get("exists") is False]
+            if missing:
+                lines.append("")
+                lines.append("**Archivos citados que no existen:** "
+                             + ", ".join(f"`{m}`" for m in missing))
+            lines.append("")
+
     # Puntos de impacto: qué archivos toca cada tarea (handoff a quien implemente)
-    impact = [t for t in plan["tasks"] if t.get("files_touched")]
+    impact = [t for t in actionable if t.get("files_touched")]
     if impact:
         lines += ["", "## Puntos de impacto (archivos por tarea)", ""]
         for t in impact:

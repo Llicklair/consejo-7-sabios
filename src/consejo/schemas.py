@@ -270,6 +270,76 @@ TURN_SCHEMA = {
 }
 
 
+VERIFICATION_SCHEMA = {
+    "type": "object",
+    "required": ["claims", "verdict"],
+    "description": (
+        "Result of adversarially fact-checking ONE task's rationale against "
+        "the real repository. Numbers the debate asserted but never measured "
+        "are caught here."
+    ),
+    "properties": {
+        "claims": {
+            "type": "array",
+            "description": (
+                "One entry per checkable factual/quantitative claim found in "
+                "the task's rationale (counts, ratios, 'X swallows errors', etc.)."
+            ),
+            "items": {
+                "type": "object",
+                "required": ["claim", "verdict"],
+                "properties": {
+                    "claim": {
+                        "type": "string",
+                        "maxLength": 500,
+                        "description": "The specific assertion you checked, quoted/paraphrased from the rationale.",
+                    },
+                    "command": {
+                        "type": "string",
+                        "maxLength": 500,
+                        "description": "The exact grep/glob/read you ran to check it (e.g. \"grep -rc 'except:' app/\").",
+                    },
+                    "observed": {
+                        "type": "string",
+                        "maxLength": 800,
+                        "description": "What the repo ACTUALLY showed — the real count, the matching lines, or the absence.",
+                    },
+                    "verdict": {
+                        "enum": ["verified", "refuted", "unverifiable"],
+                        "description": "verified = reproduced · refuted = real value differs materially · unverifiable = can't measure with Read/Glob/Grep.",
+                    },
+                },
+            },
+        },
+        "files_exist": {
+            "type": "array",
+            "description": "For each path in the task's files_touched, whether it actually exists.",
+            "items": {
+                "type": "object",
+                "required": ["path", "exists"],
+                "properties": {
+                    "path": {"type": "string"},
+                    "exists": {"type": "boolean"},
+                },
+            },
+        },
+        "verdict": {
+            "enum": ["solid", "weakened", "refuted"],
+            "description": (
+                "Overall. solid = every material claim verified · weakened = "
+                "some claims unverifiable or minor mismatches · refuted = the "
+                "task's core premise is factually false."
+            ),
+        },
+        "note": {
+            "type": "string",
+            "maxLength": 600,
+            "description": "1-2 sentences. If weakened/refuted, name exactly what's wrong.",
+        },
+    },
+}
+
+
 _VISION_SCHEMA = {
     "type": "object",
     "required": ["headline", "where_to_take_it"],

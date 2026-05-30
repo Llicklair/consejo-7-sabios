@@ -7,6 +7,7 @@ requires no change here.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import random
 import sys
@@ -20,7 +21,7 @@ from .council_prompts import (
 )
 from .driver_protocol import SageDriver
 from .sages import Sage
-from .schemas import TURN_SCHEMA, _VISION_SCHEMA
+from .schemas import TURN_SCHEMA, VERIFICATION_SCHEMA, _VISION_SCHEMA
 
 
 def _apply_plan_diff(plan: list[dict], diff: dict) -> list[dict]:
@@ -397,3 +398,155 @@ async def post_consensus_vision(
         timeout_s=120.0,
     )
     return inner
+
+
+def _verifier_system_prompt() -> str:
+    return (
+        "You are the **Verifier** of the Council of Sages — an adversarial "
+        "fact-checker. The sages have agreed on a plan, but a turn-by-turn "
+        "debate manufactures confident-sounding numbers that were NEVER "
+        "measured ('5 of 30 sites', '10-50x slower', 'wrapped in bare "
+        "except'). Your ONLY job is to check the factual and quantitative "
+        "claims in ONE task's rationale against the ACTUAL repository, and "
+        "report what the code really says.\n\n"
+        "## How you work\n"
+        "- You have Read, Glob and Grep with NO call budget. Use as many "
+        "calls as you need — checking '5 of 30 sites' means grepping ALL the "
+        "sites and ACTUALLY counting, not eyeballing two files.\n"
+        "- Extract every checkable claim from the rationale: counts, ratios, "
+        "existence claims ('bare except swallows errors'), and verify each "
+        "path in files_touched actually exists.\n"
+        "- For each claim, run the command that confirms or refutes it and "
+        "record (a) the command you ran and (b) what you OBSERVED — the real "
+        "count, the matching lines, or the absence.\n\n"
+        "## Discipline — default to skepticism\n"
+        "- `verified` ONLY when you reproduced it against the code.\n"
+        "- **A raw match count is NOT the claim.** `grep -c '.all()'` may "
+        "return 153, but if the claim is 'unbounded queries' you must OPEN the "
+        "matches and count only those that actually exhibit the property — e.g. "
+        "a `.all()` with NO `.limit()`/`.offset()` nearby. Counting text "
+        "occurrences instead of the real property is the #1 way a number lies "
+        "(a `.scalars().all()` two lines under a `.limit(50)` is bounded). Use "
+        "`-B/-A` context and read; never report a grep tally as the fact.\n"
+        "- `refuted` when the real value differs materially (the claim said "
+        "'5 of 30' and you counted 92 — that is refuted, not weakened).\n"
+        "- `unverifiable` when the tools cannot measure it (a perf ratio with "
+        "no benchmark, a subjective judgement). `unverifiable` is NOT a pass.\n"
+        "- Overall `verdict`: `solid` only if every material claim verified; "
+        "`weakened` if some are unverifiable or minor mismatches; `refuted` if "
+        "the task's CORE premise is factually false.\n"
+        "- You do NOT fix code, propose changes, or re-debate. You only check. "
+        "Be terse and numeric.\n\n"
+        "Output ONLY the JSON object matching the schema. No prose outside."
+    )
+
+
+def _verifier_user_message(repo: Path, task: dict) -> str:
+    subset = {
+        k: task.get(k)
+        for k in ("title", "rationale", "blast_radius", "files_touched")
+    }
+    return (
+        f"<repo>{repo.resolve()}</repo>\n\n"
+        f"<task_under_review>\n"
+        f"{json.dumps(subset, indent=2, ensure_ascii=False)}\n"
+        f"</task_under_review>\n\n"
+        f"Check every factual/quantitative claim in the rationale above "
+        f"against the real repository, and confirm each path in files_touched "
+        f"exists. Use as many Read/Glob/Grep calls as you need — there is no "
+        f"budget here; accuracy is the whole point.\n\n"
+        f"## Required output shape\n"
+        f"```json\n{json.dumps(VERIFICATION_SCHEMA, indent=2)}\n```\n\n"
+        f"Output ONLY the JSON object. No prose outside, no markdown fences."
+    )
+
+
+async def verify_plan_claims(
+    driver: SageDriver,
+    repo: Path,
+    plan: dict,
+    model: str = "sonnet",
+    max_concurrency: int = 3,
+    on_task=None,
+) -> dict:
+    """Adversarially fact-check every task's claims against the real repo.
+
+    For each task in ``plan['tasks']`` a Verifier subagent re-runs the
+    quantitative/factual claims in the rationale with an UNCAPPED tool budget
+    (the debate's tight cap is exactly what forces sages to assert unmeasured
+    numbers). Each task gains a ``verification`` dict; the plan gains a
+    ``verification_summary``. The report demotes ``refuted`` tasks out of the
+    actionable plan instead of presenting fabricated claims as fact.
+
+    Mutates ``plan`` in place and returns it. Never raises: a verifier that
+    fails leaves its task tagged ``unverifiable`` so a single bad subprocess
+    can't sink the whole report.
+
+    Concurrency is bounded by a LOCAL semaphore (default 3) to honour the same
+    memory ceiling as ``_SPAWN_SEM`` in the claude-code driver, without coupling
+    this backend-agnostic module to that concrete backend.
+    """
+    tasks = plan.get("tasks") or []
+    if not tasks:
+        plan["verification_summary"] = {
+            "solid": 0, "weakened": 0, "refuted": 0, "total": 0,
+        }
+        return plan
+
+    sem = asyncio.Semaphore(max_concurrency)
+
+    async def _verify_one(task: dict) -> dict:
+        async with sem:
+            try:
+                out = await driver.spawn(
+                    user_msg=_verifier_user_message(repo, task),
+                    system_prompt=_verifier_system_prompt(),
+                    schema=VERIFICATION_SCHEMA,
+                    repo=repo,
+                    model=model,
+                    allowed_tools="Read,Glob,Grep",
+                    timeout_s=420.0,
+                )
+            except Exception as e:
+                print(
+                    f"[verify-fail] {str(task.get('title', '?'))[:60]}: "
+                    f"{type(e).__name__}: {str(e)[:300]}",
+                    file=sys.stderr,
+                )
+                return {
+                    "verdict": "unverifiable",
+                    "claims": [],
+                    "files_exist": [],
+                    "note": (
+                        f"verification failed ({type(e).__name__}); claims "
+                        f"left unchecked — treat the rationale as unconfirmed."
+                    ),
+                }
+            if isinstance(out, dict):
+                out.pop("_meta", None)
+            return out
+
+    results = await asyncio.gather(*[_verify_one(t) for t in tasks])
+
+    counts = {"solid": 0, "weakened": 0, "refuted": 0}
+    for task, ver in zip(tasks, results):
+        task["verification"] = ver
+        v = (ver or {}).get("verdict")
+        if v in counts:
+            counts[v] += 1
+        print(
+            f"[verify] {str(task.get('title', '?'))[:50]:>50} -> "
+            f"{v or 'none'}",
+            file=sys.stderr,
+        )
+        if on_task:
+            await on_task(task, ver)
+
+    plan["verification_summary"] = {**counts, "total": len(tasks)}
+    print(
+        f"[verify] summary: solid={counts['solid']} "
+        f"weakened={counts['weakened']} refuted={counts['refuted']} "
+        f"of {len(tasks)}",
+        file=sys.stderr,
+    )
+    return plan

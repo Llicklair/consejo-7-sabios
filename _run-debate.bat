@@ -8,7 +8,11 @@ echo  Consejo en curso sobre: %CD%
 echo  El plan ira a consejo-report-*.md (en esta carpeta). Cierra para abortar.
 echo.
 
-"%~dp0.venv\Scripts\python.exe" -m consejo.cli "¿Cómo mejoramos este proyecto?" --repo "%CD%" --mode claude-code --consensus --consensus-rounds 10 --consensus-min-rounds 8 --cc-model opus --speed 0.3
+REM Convergencia: si los 6 sabios firman el mismo plan, el debate PARA (a partir
+REM de la ronda 2 — la ronda 1 tiene la firma suprimida, es solo proponer). Si no
+REM hay unanimidad, sigue hasta el techo de 8 rondas. min=2 evita las rondas
+REM muertas que forzaba min=8 (firmaban en la r3 y daban vueltas en vacio hasta la 8).
+"%~dp0.venv\Scripts\python.exe" -m consejo.cli "¿Cómo mejoramos este proyecto?" --repo "%CD%" --mode claude-code --consensus --consensus-rounds 8 --consensus-min-rounds 2 --cc-model opus --speed 0.3
 
 echo.
 echo  Consejo finalizado. Plan:
