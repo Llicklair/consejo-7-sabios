@@ -21,11 +21,18 @@ while (-not $file) {
     }
     if ($waited -eq 0) {
         Write-Host "Esperando a que arranque el debate (consejo-debate-*.jsonl)..." -ForegroundColor Yellow
+        Write-Host "En repos grandes la pasada de analisis previa puede tardar 20-30 min; esto NO esta colgado." -ForegroundColor DarkGray
     }
     Start-Sleep -Seconds 1
     $waited++
-    if ($waited -gt 300) {
-        Write-Host "No apareció ningún debate en 5 min. Saliendo." -ForegroundColor Red
+    # Latido cada 30 s para que se vea que sigue vivo durante el analisis largo.
+    if ($waited % 30 -eq 0) {
+        Write-Host ("  ...sigo esperando ({0:mm\:ss} en analisis). Ctrl+C para salir." -f ([TimeSpan]::FromSeconds($waited))) -ForegroundColor DarkGray
+    }
+    # Techo amplio: el analisis de un repo grande puede tardar mucho antes de
+    # escribir la cabecera. 45 min evita el falso "no arranco" del tope de 5 min.
+    if ($waited -gt 2700) {
+        Write-Host "No aparecio ningun debate en 45 min. Saliendo (revisa el panel de arriba por [analysis-fail])." -ForegroundColor Red
         exit 1
     }
 }

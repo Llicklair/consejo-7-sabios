@@ -69,7 +69,7 @@ Estas 4 tareas de desarrollo corren en el terminal integrado de VSCode.
 
 ### `/invoco-al-consejo` — lanzamiento externo (recomendado)
 
-`Ctrl+Shift+B` ya **no** corre el debate dentro de VSCode. Lanza `consejo.bat`
+`Ctrl+Shift+B` ya **no** corre el debate dentro de VSCode. Lanza `consejo-menu.bat`
 en una **ventana cmd externa**, de modo que el debate **sobrevive si VSCode se
 actualiza o crashea** (correrlo en el terminal integrado lo mataba a media
 sesión). Además abre **una segunda ventana** que sigue el debate en vivo, turno
@@ -82,21 +82,19 @@ a turno y formateado (`watch-debate.ps1`, espera sola a que arranque el debate).
   a quien implemente).
 - **Log en vivo:** `consejo-debate-<timestamp>.jsonl` (lo que sigue la 2ª ventana).
 
-Lanzamiento manual equivalente (sin VSCode): doble-clic en **`consejo.bat`**
-(abre el watcher automáticamente). Para seguir un debate ya en curso desde otra
-terminal: doble-clic en **`watch-debate.bat`**.
+Lanzamiento manual equivalente (sin VSCode): doble-clic en **`consejo-menu.bat`**
+— abre un selector de carpeta, lanza el debate sobre el repo elegido en 2 paneles
+(debate + vista en vivo) automáticamente. También acepta el repo como argumento
+(`consejo-menu.bat "C:\ruta\al\repo"`), que es como lo invoca `Ctrl+Shift+B`. Para
+seguir un debate ya en curso desde otra terminal:
+`powershell -ExecutionPolicy Bypass -File watch-debate.ps1`.
 
-### Launch desde scripts
+### Launch desde la CLI
 
-Hay wrappers en `scripts/`:
+Sin interfaz, en cualquier plataforma:
 
-```powershell
-.\scripts\run-consejo.ps1                              # prompt interactivo
-.\scripts\run-consejo.ps1 -Atasco "fix auth" -Mode claude-code
-```
 ```bash
-./scripts/run-consejo.sh "fix auth"
-MODE=claude-code ./scripts/run-consejo.sh "fix auth"
+python -m consejo.cli "¿Cómo mejoramos este proyecto?" --repo . --mode claude-code --consensus
 ```
 
 ### Quick start manual
