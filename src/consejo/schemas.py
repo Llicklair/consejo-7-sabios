@@ -308,6 +308,15 @@ VERIFICATION_SCHEMA = {
                         "enum": ["verified", "refuted", "unverifiable"],
                         "description": "verified = reproduced · refuted = real value differs materially · unverifiable = can't measure with Read/Glob/Grep.",
                     },
+                    "is_core": {
+                        "type": "boolean",
+                        "description": (
+                            "true if this claim is the task's CENTRAL "
+                            "justification — the reason the task exists — not a "
+                            "peripheral detail. A refuted core claim forces the "
+                            "overall verdict to 'refuted' (enforced in code)."
+                        ),
+                    },
                 },
             },
         },

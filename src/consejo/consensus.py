@@ -432,9 +432,15 @@ def _verifier_system_prompt() -> str:
         "'5 of 30' and you counted 92 — that is refuted, not weakened).\n"
         "- `unverifiable` when the tools cannot measure it (a perf ratio with "
         "no benchmark, a subjective judgement). `unverifiable` is NOT a pass.\n"
+        "- **Mark `is_core: true`** on the claim(s) that ARE the task's central "
+        "justification — the reason the task exists. Peripheral details are "
+        "`is_core: false`. Be honest about which is which.\n"
         "- Overall `verdict`: `solid` only if every material claim verified; "
-        "`weakened` if some are unverifiable or minor mismatches; `refuted` if "
-        "the task's CORE premise is factually false.\n"
+        "`refuted` if a CORE claim is false (the task's premise collapses — "
+        "even if peripheral claims hold); `weakened` ONLY when the core holds "
+        "but some peripheral claims are unverifiable or minor mismatches. Do "
+        "NOT soften a refuted core premise to `weakened` — if the reason the "
+        "task exists is false, the verdict is `refuted`.\n"
         "- You do NOT fix code, propose changes, or re-debate. You only check. "
         "Be terse and numeric.\n\n"
         "Output ONLY the JSON object matching the schema. No prose outside."
@@ -459,6 +465,34 @@ def _verifier_user_message(repo: Path, task: dict) -> str:
         f"```json\n{json.dumps(VERIFICATION_SCHEMA, indent=2)}\n```\n\n"
         f"Output ONLY the JSON object. No prose outside, no markdown fences."
     )
+
+
+def _enforce_core_refutation(ver: dict) -> dict:
+    """Deterministic guard: if any claim the verifier marked ``is_core`` was
+    refuted, the overall task verdict is ``refuted`` — no matter what the model
+    rolled up. The model supplies the judgement (which claim is core); the code
+    enforces the consequence, the same split used for round-1 sign suppression.
+
+    Closes the calibration miss seen 2026-05-30: a task whose central premise
+    was refuted got rolled up to ``weakened`` and so was never demoted out of
+    the actionable plan. Degrades safely — if no claim carries ``is_core`` the
+    model's own verdict stands.
+    """
+    if not isinstance(ver, dict):
+        return ver
+    claims = ver.get("claims") or []
+    core_refuted = any(
+        isinstance(c, dict) and c.get("is_core") and c.get("verdict") == "refuted"
+        for c in claims
+    )
+    if core_refuted and ver.get("verdict") != "refuted":
+        note = ver.get("note") or ""
+        ver = {
+            **ver,
+            "verdict": "refuted",
+            "note": ("[auto: premisa central refutada → tarea refutada] " + note).strip(),
+        }
+    return ver
 
 
 async def verify_plan_claims(
@@ -524,7 +558,7 @@ async def verify_plan_claims(
                 }
             if isinstance(out, dict):
                 out.pop("_meta", None)
-            return out
+            return _enforce_core_refutation(out)
 
     results = await asyncio.gather(*[_verify_one(t) for t in tasks])
 

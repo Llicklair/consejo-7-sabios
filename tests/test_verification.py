@@ -78,6 +78,46 @@ def test_verify_attaches_verdict_and_summary():
     }
 
 
+def test_core_refuted_claim_escalates_task_to_refuted():
+    """Calibración 2026-05-30: si una claim marcada is_core se refuta, la tarea
+    queda 'refuted' aunque el modelo la haya rodado a 'weakened'. El código
+    fuerza la consecuencia; el modelo solo aporta el juicio (qué es core)."""
+    tasks = [{"priority": 1, "title": "Extraer renderer real", "rationale": "r",
+              "blast_radius": "MEDIUM"}]
+    driver = _StubDriver({
+        # El modelo rodó a 'weakened' pese a refutar la premisa central.
+        "Extraer renderer real": {
+            "verdict": "weakened",
+            "claims": [
+                {"claim": "no existe renderer real", "verdict": "refuted",
+                 "is_core": True, "observed": "render_plan_markdown ya existe"},
+                {"claim": "report.py es fake", "verdict": "verified",
+                 "is_core": False},
+            ],
+            "files_exist": [],
+        },
+    })
+    plan = asyncio.run(verify_plan_claims(driver, Path("."), _plan(tasks)))
+    ver = plan["tasks"][0]["verification"]
+    assert ver["verdict"] == "refuted"  # escalado forzado en código
+    assert "premisa central refutada" in ver["note"]
+    assert plan["verification_summary"]["refuted"] == 1
+
+
+def test_peripheral_refuted_claim_does_not_escalate():
+    """Una claim refutada NO-core no debe hundir la tarea: si el core aguanta,
+    el veredicto del modelo (weakened) se respeta."""
+    tasks = [{"priority": 1, "title": "T", "rationale": "r", "blast_radius": "SAFE"}]
+    driver = _StubDriver({
+        "T": {"verdict": "weakened", "files_exist": [], "claims": [
+            {"claim": "detalle menor", "verdict": "refuted", "is_core": False},
+            {"claim": "premisa", "verdict": "verified", "is_core": True},
+        ]},
+    })
+    plan = asyncio.run(verify_plan_claims(driver, Path("."), _plan(tasks)))
+    assert plan["tasks"][0]["verification"]["verdict"] == "weakened"  # sin escalar
+
+
 def test_verify_empty_plan_is_noop():
     plan = asyncio.run(verify_plan_claims(_StubDriver({}), Path("."), _plan([])))
     assert plan["verification_summary"]["total"] == 0
