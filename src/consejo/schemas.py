@@ -10,51 +10,6 @@ array" failures.
 from __future__ import annotations
 
 
-ANALYSIS_SCHEMA = {
-    "type": "object",
-    "required": ["files"],
-    "description": (
-        "Per-file analysis of ONE batch of files. EVERY file in the manifest "
-        "MUST appear in `files` — accounting for all of them is the whole "
-        "point; the loop re-queues any you omit."
-    ),
-    "properties": {
-        "files": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "required": ["path", "purpose"],
-                "properties": {
-                    "path": {
-                        "type": "string",
-                        "description": "Repo-relative path, EXACTLY as given in the manifest.",
-                    },
-                    "purpose": {
-                        "type": "string",
-                        "maxLength": 600,
-                        "description": "What this file does, 1-2 sentences, concrete, from actually reading it (not guessed from the name).",
-                    },
-                    "role": {
-                        "type": "string",
-                        "description": "entrypoint | core | util | model | test | config | docs | scaffold | other",
-                    },
-                    "key_symbols": {
-                        "type": "array",
-                        "items": {"type": "string", "maxLength": 200},
-                        "description": "Main functions / classes / exports in this file.",
-                    },
-                    "concerns": {
-                        "type": "array",
-                        "items": {"type": "string", "maxLength": 400},
-                        "description": "Tech debt, bugs, smells, risks observed in THIS file. Empty list if clean. Be specific (symbol + why).",
-                    },
-                },
-            },
-        },
-    },
-}
-
-
 PROPOSAL_SCHEMA = {
     "type": "object",
     "required": ["proposals"],

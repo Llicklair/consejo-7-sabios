@@ -534,9 +534,7 @@ async def run_council(atasco: str, repo: Path, bus: EventBus,
                       consensus_max_rounds: int = 20,
                       consensus_min_rounds: int = 1,
                       backend: str = "claude-code",
-                      analysis_enabled: bool = True,
-                      analysis_max_batches: int | None = None,
-                      analysis_model: str = "sonnet") -> dict:
+                      analysis_enabled: bool = True) -> dict:
     """Ejecuta el consejo completo y empuja eventos al bus para el animator.
 
     `atasco_lang`: idioma del atasco del usuario ('es' o 'en'). Si es 'es' y
@@ -569,39 +567,44 @@ async def run_council(atasco: str, repo: Path, bus: EventBus,
         )
         driver = build_backend(backend)
 
-        # === P1: pasada de análisis de cobertura COMPLETA ===
-        # Lee TODOS los archivos (resumiendo desde el ledger persistente, así
-        # solo lo nuevo/cambiado cuesta), escribe el mapa completo a .consejo/
-        # y construye un brief acotado que alimenta CADA turno del debate — para
-        # que los sabios argumenten sobre todo el repo, no un ojo de cerrajero.
+        # === P1: mapa estructural DETERMINISTA del repo (sin LLM) ===
+        # Antes, una pasada LLM leía TODOS los archivos para mapearlos: en un repo
+        # grande eran ~70 subagentes y 20-30 min ANTES del debate — el sumidero de
+        # coste. Ahora un extractor determinista (AST/regex, cero LLM, segundos)
+        # saca el esqueleto de cada archivo (propósito + símbolos + imports),
+        # ~27x más pequeño que el código. Escribe el mapa completo a .consejo/ y
+        # un censo acotado que alimenta CADA turno; los sabios leen el mapa y los
+        # archivos concretos cuando necesitan juicio.
         repo_brief = ""
         if analysis_enabled:
-            from .analysis import (
-                coverage_summary,
-                enumerate_units,
-                render_repo_brief,
-                render_repo_map,
-                run_analysis_pass,
+            from .repo_skeleton import (
+                build_dependency_graph,
+                build_skeletons,
+                git_churn,
+                render_skeleton_brief,
+                render_skeleton_map,
             )
             try:
-                ledger = await run_analysis_pass(
-                    driver, repo, model=analysis_model,
-                    max_batches=analysis_max_batches,
-                )
-                a_units = enumerate_units(repo)
-                repo_brief = render_repo_brief(ledger, a_units)
-                summ = coverage_summary(ledger, a_units)
+                def _map() -> tuple[list, object, dict]:
+                    sk = build_skeletons(repo)
+                    return (sk, build_dependency_graph(repo, sk),
+                            git_churn(repo))
+                skeletons, graph, churn = await asyncio.to_thread(_map)
+                repo_brief = render_skeleton_brief(skeletons, graph, churn)
                 try:
-                    map_path = repo / ".consejo" / "repo-map.md"
+                    map_path = repo / ".consejo" / "repo-skeleton.md"
                     map_path.parent.mkdir(parents=True, exist_ok=True)
                     map_path.write_text(
-                        render_repo_map(ledger, a_units), encoding="utf-8")
+                        render_skeleton_map(skeletons, graph, churn),
+                        encoding="utf-8")
                 except OSError:
                     pass
-                print(f"[analysis] brief listo: {summ['covered']}/{summ['total']} "
-                      f"archivos, {summ['concerns']} concerns", file=sys.stderr)
+                total_loc = sum(s.loc for s in skeletons)
+                print(f"[skeleton] mapa listo: {len(skeletons)} archivos, "
+                      f"{total_loc} loc, {len(graph.cycles)} ciclos, "
+                      f"{len(churn)} con churn, sin coste LLM", file=sys.stderr)
             except Exception as e:
-                print(f"[analysis-stage-fail] {str(e)[:400]}", file=sys.stderr)
+                print(f"[skeleton-stage-fail] {str(e)[:400]}", file=sys.stderr)
 
         await asyncio.sleep(2.0 / speed)
 
