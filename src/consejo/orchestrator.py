@@ -138,6 +138,11 @@ SAGE_KEYWORDS: dict[str, list[str]] = {
     # Juez absorbs Strategist keywords for briefing
     "juez":          ["README", "ARCHITECTURE", "vision", "scope",
                       "roadmap", "user", "stakeholder", "milestone"],
+    # Producto (voice-only): features, business model, legal/regulatory, UX
+    "producto":      ["feature", "user", "onboard", "pricing", "billing",
+                      "tenant", "subscription", "plan", "quota", "limit",
+                      "legal", "compliance", "consent", "tutorial", "UX",
+                      "upgrade", "paywall", "trial"],
 }
 
 
@@ -630,7 +635,7 @@ async def run_council(atasco: str, repo: Path, bus: EventBus,
                 "speaker": sage.id,
                 "speaker_idx": speaker_idx,
                 "plan_size": len(current_plan),
-                "voice_only": False,
+                "voice_only": sage not in SAGES,  # producto debate sin asiento
             })
 
         plan = await consensus_dialogue(

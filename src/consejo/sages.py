@@ -158,15 +158,47 @@ SAGES: list[Sage] = [
 ]
 
 
-# Voice-only sages have been retired: their expertise has been absorbed
-# into the seated sages. Estructurador absorbs Architect + Designer.
-# Guardian absorbs Guardian + Ambassador. Juez absorbs Judge + Strategist.
-VOICE_ONLY_SAGES: list[Sage] = []
+# Most voice-only sages were retired (absorbed into seated sages: Estructurador
+# ← Architect+Designer, Guardian ← Guardian+Ambassador, Juez ← Judge+Strategist).
+# The PRODUCTO sage is re-added as voice-only — it DEBATES and VOTES like any
+# sage, but has no sprite/seat (so no pixel-art work). Reason: an all-engineer
+# council defaults to tech-debt and never proposes features, algorithms, UX, or
+# legal/regulatory work. The Juez's pre-debate framing only *seeds* those angles;
+# this sage *fights* for them — the axis-floor rule in its prompt forces ≥2
+# product items into the plan before it will sign, so product actually lands.
+VOICE_ONLY_SAGES: list[Sage] = [
+    Sage(
+        id="producto",
+        role="Producto",
+        archetype="Visionario",
+        sprite_color=(255, 0, 144),   # no se renderiza (voice-only); placeholder
+        accent_color=(255, 0, 144),
+        glyph_color=(255, 0, 144),
+        name_en="Product",
+        expertise_en=(
+            "You defend the USER and the MARKET. You attack technically-clean "
+            "code that ships no capability the user needs. You champion: features "
+            "that drive adoption, algorithms that make the product measurably "
+            "better, UX that earns trust, and LEGAL/REGULATORY requirements that "
+            "gate selling at all — a compliance blocker outranks any refactor. "
+            "You attack a council that mistakes hygiene for progress: 'the engine "
+            "is cleaner' is NOT 'the product is better'. When the framing surfaces "
+            "a product, legal, or UX gap, you FIGHT to put a concrete item in the "
+            "plan — not just acknowledge it and sign a pure-refactor plan anyway. "
+            "Ask: 'what makes a customer pay, stay, or trust this — and what "
+            "blocks them today?'"
+        ),
+        voice_en="product-minded and commercial; cites adoption, willingness-to-"
+                 "pay, regulatory gates, and the cost of NOT shipping a capability",
+        foil_en="Conservative",
+    ),
+]
 
-ALL_SAGES: list[Sage] = SAGES
+ALL_SAGES: list[Sage] = SAGES + VOICE_ONLY_SAGES
 
-# The six sages that participate in the debate (Juez only arbitrates / synthesizes).
-DEBATE_SAGES: list[Sage] = [s for s in SAGES if s.id != "juez"]
+# Debaters = the six seated engineers + voice-only sages. The Juez does NOT debate
+# (it frames before the rounds and synthesizes after).
+DEBATE_SAGES: list[Sage] = [s for s in SAGES if s.id != "juez"] + VOICE_ONLY_SAGES
 
 
 def by_id(sage_id: str) -> Sage:

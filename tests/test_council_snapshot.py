@@ -47,14 +47,17 @@ def _run_mock_council(seed: int = 42, rounds: int = 3) -> dict:
     return asyncio.run(_go())
 
 
-def test_roster_has_seven_sages_six_debaters_one_judge():
-    assert len(SAGES) == 7
-    assert len(VOICE_ONLY_SAGES) == 0, "voice-only sages have been retired into seated roles"
-    assert len(ALL_SAGES) == 7
-    assert len(DEBATE_SAGES) == 6
+def test_roster_seven_seated_plus_voice_only_product_debater():
+    assert len(SAGES) == 7                       # 6 ingenieros + juez (sentados)
+    assert len(VOICE_ONLY_SAGES) == 1            # producto: debate sin asiento
+    assert {s.id for s in VOICE_ONLY_SAGES} == {"producto"}
+    assert len(ALL_SAGES) == 8
+    assert len(DEBATE_SAGES) == 7                # 6 ingenieros + producto (sin juez)
     debate_ids = {s.id for s in DEBATE_SAGES}
-    assert "juez" not in debate_ids
+    assert "juez" not in debate_ids              # el juez encuadra/sintetiza
+    assert "producto" in debate_ids              # producto debate y vota
     assert "juez" in {s.id for s in SAGES}
+    assert "producto" not in {s.id for s in SAGES}   # voice-only: no se sienta
 
 
 def test_sage_keywords_cover_all_sages():
