@@ -581,6 +581,7 @@ async def run_council(atasco: str, repo: Path, bus: EventBus,
         # un censo acotado que alimenta CADA turno; los sabios leen el mapa y los
         # archivos concretos cuando necesitan juicio.
         repo_brief = ""
+        zones = None
         if analysis_enabled:
             from .repo_skeleton import (
                 build_dependency_graph,
@@ -588,13 +589,15 @@ async def run_council(atasco: str, repo: Path, bus: EventBus,
                 git_churn,
                 render_skeleton_brief,
                 render_skeleton_map,
+                repo_zones,
             )
             try:
-                def _map() -> tuple[list, object, dict]:
+                def _map() -> tuple[list, object, dict, list]:
                     sk = build_skeletons(repo)
-                    return (sk, build_dependency_graph(repo, sk),
-                            git_churn(repo))
-                skeletons, graph, churn = await asyncio.to_thread(_map)
+                    g = build_dependency_graph(repo, sk)
+                    ch = git_churn(repo)
+                    return sk, g, ch, repo_zones(sk, g, ch)
+                skeletons, graph, churn, zones = await asyncio.to_thread(_map)
                 repo_brief = render_skeleton_brief(skeletons, graph, churn)
                 try:
                     map_path = repo / ".consejo" / "repo-skeleton.md"
@@ -645,6 +648,7 @@ async def run_council(atasco: str, repo: Path, bus: EventBus,
             model=cc_model,
             on_turn=_on_turn,
             repo_brief=repo_brief,
+            zones=zones,
         )
         plan["atasco_es"] = atasco_es_original
         plan["atasco_en"] = atasco

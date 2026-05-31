@@ -591,6 +591,72 @@ def score_files(skeletons: list[FileSkeleton], graph: DepGraph,
     return scores
 
 
+# ---------- coverage zones (the breadth gate: don't let the plan be a keyhole) ----------
+#
+# The debate's failure mode on a big repo is *drilling the first coherent vein*:
+# it converges in 2-3 rounds on one theme (auth, or billing, or the orchestrator)
+# and silently ignores the other 95% of the system. The deterministic map already
+# guarantees COVERAGE for analysis; this brings the same discipline to the PLAN.
+# Zones partition the repo by concern (dir prefix); a per-turn scorecard shows
+# which major zones the current plan touches, so a sage can see — and the prompt's
+# breadth-floor rule forces them to address — a zone the council is ducking.
+
+@dataclass
+class Zone:
+    name: str            # repo-relative dir prefix, e.g. "backend/app/agents"
+    file_count: int
+    score: float         # sum of file debate-scores in the zone (importance)
+
+
+def _zone_of(path: str) -> str:
+    """The concern-zone a file belongs to: its directory, capped at 3 segments."""
+    parts = path.replace("\\", "/").strip("/").split("/")
+    dirs = parts[:-1]
+    return "/".join(dirs[:3]) if dirs else "(root)"
+
+
+def repo_zones(skeletons: list[FileSkeleton], graph: DepGraph,
+               churn: dict[str, int] | None = None, top_n: int = 12) -> list[Zone]:
+    """The major zones of the repo, ranked by aggregate importance (debate-score).
+    Deterministic. Used to gate the plan's breadth."""
+    scores = {f.path: f.score for f in score_files(skeletons, graph, churn)}
+    agg: dict[str, list] = {}
+    for s in skeletons:
+        a = agg.setdefault(_zone_of(s.path), [0, 0.0])
+        a[0] += 1
+        a[1] += scores.get(s.path, 0.0)
+    zones = [Zone(name=z, file_count=c, score=round(sc, 1)) for z, (c, sc) in agg.items()]
+    zones.sort(key=lambda z: z.score, reverse=True)
+    return zones[:top_n]
+
+
+def render_coverage(plan: list[dict], zones: list[Zone]) -> str:
+    """A per-turn scorecard: how many plan items touch each major zone. Injected
+    into the debate so a zone with ZERO items is VISIBLE, not silently skipped."""
+    if not zones:
+        return ""
+    covered: dict[str, int] = {}
+    for task in (plan or []):
+        hit = {_zone_of(str(ft)) for ft in (task.get("files_touched") or [])}
+        for z in hit:
+            covered[z] = covered.get(z, 0) + 1
+    lines = ["Cobertura del plan por zona (zonas mayores del repo, por importancia):"]
+    for z in zones:
+        k = covered.get(z.name, 0)
+        mark = f"✓ {k} ítem(s)" if k else "✗ SIN TOCAR"
+        warn = " ⚠️" if not k else ""
+        lines.append(f"- `{z.name}` ({z.file_count} arch, score {z.score:.0f}) → {mark}{warn}")
+    untouched = [z.name for z in zones if not covered.get(z.name)]
+    if untouched:
+        lines.append("")
+        lines.append(
+            "Zonas mayores SIN ningún ítem: " + ", ".join(f"`{z}`" for z in untouched)
+            + ". Antes de firmar: propón 1 ítem REAL de alto valor en alguna, o "
+            "el plan debe nombrar por qué queda fuera esta iteración. Un plan que "
+            "ignora media base es un ojo de cerradura, no un plan.")
+    return "\n".join(lines)
+
+
 # ---------- rendering ----------
 
 def _render_connectivity(graph: "DepGraph", top_n: int = 15,

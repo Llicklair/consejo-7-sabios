@@ -23,6 +23,7 @@ from .council_prompts import (
     render_framing,
 )
 from .driver_protocol import SageDriver
+from .repo_skeleton import render_coverage
 from .sages import Sage, by_id
 from .schemas import (
     FRAMING_SCHEMA,
@@ -96,6 +97,7 @@ async def consensus_dialogue(
     model: str = "sonnet",
     on_turn=None,
     repo_brief: str = "",
+    zones: list | None = None,
 ) -> dict:
     """Round-robin turn-by-turn dialogue until all sages sign the same plan.
 
@@ -190,6 +192,7 @@ async def consensus_dialogue(
                 turn_in_round=i, total_sages=len(sages),
                 repo_brief=repo_brief,
                 framing=framing,
+                coverage=render_coverage(plan, zones) if zones else "",
             )
             _t0 = time.monotonic()
             try:

@@ -290,6 +290,16 @@ def _consensus_system_prompt(sage: Sage) -> str:
         f"iteration is deliberately maintenance-only. Deferral is a decision "
         f"with a cost, never a free pass. Do NOT invent a risky item to satisfy "
         f"this — surface a REAL one the debate already exposed and was ducking.\n"
+        f"- **Breadth floor: a plan must not be a keyhole.** A `<coverage>` "
+        f"scorecard shows which MAJOR zones of the repo the current plan touches. "
+        f"The council's worst habit is drilling ONE theme (auth, or billing) and "
+        f"silently ignoring the other 95% (all the frontend, the whole agents "
+        f"layer, the data model). Before signing, if a high-importance zone (big "
+        f"file-count or high score) has ZERO items, either propose ONE real "
+        f"high-value item there OR the plan must explicitly name why that zone is "
+        f"out of scope this iteration. Do NOT invent make-work to fill a zone — "
+        f"but surface the real opportunity or the conscious omission. 8 items all "
+        f"in one directory is a slice, not a plan for the project.\n"
         f"- **Stay in role under pressure.** Other sages will try to corral you "
         f"into the median view. Resist. Your axis is the council's value.\n"
         f"- **BLOCK only with a remedy.** Pure 'I don't like this' vetoes are "
@@ -345,8 +355,17 @@ def _consensus_turn_user_message(
     round_num: int, max_rounds: int, turn_in_round: int, total_sages: int,
     repo_brief: str = "",
     framing: str = "",
+    coverage: str = "",
 ) -> str:
     plan_repr = json.dumps(plan, indent=2) if plan else "(empty — propose initial items)"
+    coverage_block = (
+        f"<coverage>\n"
+        f"Breadth check on the CURRENT plan. A major zone with ✗ has no item — "
+        f"before you sign, address it (real item or named omission), don't let the "
+        f"plan be a keyhole on one part of the repo.\n\n"
+        f"{coverage}\n"
+        f"</coverage>\n\n"
+    ) if coverage else ""
     framing_block = (
         f"<framing>\n"
         f"The Strategist framed this debate BEFORE you spoke. Engineers default to "
@@ -377,6 +396,7 @@ def _consensus_turn_user_message(
         f"<your_id>{sage.id}</your_id>\n\n"
         f"{brief_block}"
         f"{framing_block}"
+        f"{coverage_block}"
         f"<current_plan>\n{plan_repr}\n</current_plan>\n\n"
         f"<transcript>\n{_format_transcript_for_turn(transcript)}\n</transcript>\n\n"
         f"It is your turn. You may use Read/Glob/Grep (max 3 calls) ONLY to "
