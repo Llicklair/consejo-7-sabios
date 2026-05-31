@@ -52,6 +52,15 @@ Get-Content -LiteralPath $file.FullName -Wait -Encoding UTF8 | ForEach-Object {
         return
     }
 
+    if ($o.kind -eq "framing") {
+        Write-Host ""
+        Write-Host ("-" * 70) -ForegroundColor DarkMagenta
+        Write-Host "ENCUADRE DEL JUEZ  (lente de producto, antes del debate)" -ForegroundColor Magenta
+        Write-Host $o.framing -ForegroundColor Gray
+        Write-Host ("-" * 70) -ForegroundColor DarkMagenta
+        return
+    }
+
     $signed = $o.vote.signed
     $tag = if ($signed) { "FIRMA" } else { "BLOQUEA" }
     $color = if ($signed) { "Green" } else { "Yellow" }

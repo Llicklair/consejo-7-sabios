@@ -10,6 +10,38 @@ array" failures.
 from __future__ import annotations
 
 
+FRAMING_SCHEMA = {
+    "type": "object",
+    "required": ["product_questions", "missed_angles"],
+    "description": (
+        "The Strategist's pre-debate framing. NOT tasks and NOT a vote — it "
+        "widens the lens so the engineer-sages debate the whole space, not just "
+        "refactoring."
+    ),
+    "properties": {
+        "product_questions": {
+            "type": "array",
+            "items": {"type": "string", "maxLength": 300},
+            "description": (
+                "3-5 sharp user/product/strategic questions the council should "
+                "keep in view (who is the user, what changes if we don't, what is "
+                "on the critical path)."
+            ),
+        },
+        "missed_angles": {
+            "type": "array",
+            "items": {"type": "string", "maxLength": 300},
+            "description": (
+                "2-4 CONCRETE improvement angles BEYOND refactoring/tech-debt — "
+                "a missing feature, a better algorithm, a UX or product gain, "
+                "deeper security — that this codebase plausibly needs and an "
+                "all-engineer debate tends to skip. Ground each in the repo."
+            ),
+        },
+    },
+}
+
+
 PROPOSAL_SCHEMA = {
     "type": "object",
     "required": ["proposals"],

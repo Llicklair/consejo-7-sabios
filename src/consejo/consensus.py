@@ -18,10 +18,18 @@ from pathlib import Path
 from .council_prompts import (
     _consensus_system_prompt,
     _consensus_turn_user_message,
+    _juez_framing_system_prompt,
+    _juez_framing_user_message,
+    render_framing,
 )
 from .driver_protocol import SageDriver
-from .sages import Sage
-from .schemas import TURN_SCHEMA, VERIFICATION_SCHEMA, _VISION_SCHEMA
+from .sages import Sage, by_id
+from .schemas import (
+    FRAMING_SCHEMA,
+    TURN_SCHEMA,
+    VERIFICATION_SCHEMA,
+    _VISION_SCHEMA,
+)
 
 
 def _apply_plan_diff(plan: list[dict], diff: dict) -> list[dict]:
@@ -136,6 +144,37 @@ async def consensus_dialogue(
     except OSError:
         live_log = None
 
+    # === Framing turn (Strategist) — seed the product/user/strategic lens BEFORE
+    # the six engineers default to tech-debt cleanup. The Juez normally only
+    # synthesizes at the END, too late to widen the debate; this early turn
+    # injects the angles an all-engineer council misses. Failure degrades to no
+    # framing — it never blocks the debate. One extra spawn per run. ===
+    framing = ""
+    try:
+        framing_out = await driver.spawn(
+            user_msg=_juez_framing_user_message(atasco, repo, repo_brief),
+            system_prompt=_juez_framing_system_prompt(),
+            schema=FRAMING_SCHEMA,
+            repo=repo,
+            model=model,
+            allowed_tools="Read,Glob,Grep",
+            timeout_s=300.0,
+        )
+        framing = render_framing(framing_out)
+        if framing and live_log:
+            try:
+                with live_log.open("a", encoding="utf-8") as fh:
+                    fh.write(json.dumps(
+                        {"kind": "framing", "sage_id": "juez", "framing": framing},
+                        ensure_ascii=False) + "\n")
+            except OSError:
+                pass
+        print(f"[framing] encuadre del juez listo ({len(framing)} chars)",
+              file=sys.stderr)
+    except Exception as e:
+        print(f"[framing-fail] {str(e)[:300]} — debate sigue sin encuadre",
+              file=sys.stderr)
+
     for r in range(1, max_rounds + 1):
         rounds_used = r
         round_order = list(sages)
@@ -150,6 +189,7 @@ async def consensus_dialogue(
                 round_num=r, max_rounds=max_rounds,
                 turn_in_round=i, total_sages=len(sages),
                 repo_brief=repo_brief,
+                framing=framing,
             )
             _t0 = time.monotonic()
             try:

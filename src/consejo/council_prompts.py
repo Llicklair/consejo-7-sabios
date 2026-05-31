@@ -10,9 +10,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from .sages import Sage
+from .sages import Sage, by_id
 from .schemas import (
     CRITIQUE_SCHEMA,
+    FRAMING_SCHEMA,
     JUDGE_SCHEMA,
     PROPOSAL_SCHEMA,
     TURN_SCHEMA,
@@ -296,6 +297,12 @@ def _consensus_system_prompt(sage: Sage) -> str:
         f"resolve it.\n"
         f"- **Cite real files/symbols** from this repo when proposing or amending. "
         f"Generic linter advice is rejected.\n"
+        f"- **No number without a receipt.** Any quantitative claim — counts "
+        f"('N files import this'), ratios, 'Xx faster/slower', 'M call sites' — "
+        f"MUST come from a Read/Glob/Grep you ran THIS turn, cited inline as "
+        f"`medido: <comando> → <resultado>`. If you cannot measure it, write "
+        f"`estimado` and give NO hard figure. Unmeasured numbers are refuted by "
+        f"the verifier downstream and discredit the whole item — measure first.\n"
         f"- **Don't churn.** If you amended an item last turn and another sage "
         f"endorsed the amendment, move on.\n\n"
         f"## Output\n"
@@ -337,8 +344,19 @@ def _consensus_turn_user_message(
     transcript: list[dict], plan: list[dict],
     round_num: int, max_rounds: int, turn_in_round: int, total_sages: int,
     repo_brief: str = "",
+    framing: str = "",
 ) -> str:
     plan_repr = json.dumps(plan, indent=2) if plan else "(empty — propose initial items)"
+    framing_block = (
+        f"<framing>\n"
+        f"The Strategist framed this debate BEFORE you spoke. Engineers default to "
+        f"refactoring; these are the product/user/strategic angles to keep in "
+        f"view. Before signing, consider whether a NON-refactor item (a feature, "
+        f"an algorithm, a UX or security gain) belongs in the plan — don't let the "
+        f"council ship a pure-hygiene plan if a real product need is open.\n\n"
+        f"{framing}\n"
+        f"</framing>\n\n"
+    ) if framing else ""
     brief_block = (
         f"<repo_analysis>\n"
         f"A deterministic pass mapped EVERY file in the repo — its purpose, "
@@ -358,6 +376,7 @@ def _consensus_turn_user_message(
         f"<turn_in_round>{turn_in_round}/{total_sages}</turn_in_round>\n"
         f"<your_id>{sage.id}</your_id>\n\n"
         f"{brief_block}"
+        f"{framing_block}"
         f"<current_plan>\n{plan_repr}\n</current_plan>\n\n"
         f"<transcript>\n{_format_transcript_for_turn(transcript)}\n</transcript>\n\n"
         f"It is your turn. You may use Read/Glob/Grep (max 3 calls) ONLY to "
@@ -366,5 +385,71 @@ def _consensus_turn_user_message(
         f"```json\n{json.dumps(TURN_SCHEMA, indent=2)}\n```\n\n"
         f"Output ONLY the JSON object. No prose outside, no markdown fences."
     )
+
+
+# ---------- Framing turn (the Strategist seeds the debate before the engineers) ----------
+
+def _juez_framing_system_prompt() -> str:
+    """The Judge/Strategist speaks BEFORE the six engineers — to widen the lens.
+    Without this, the all-engineer council defaults to tech-debt cleanup and never
+    asks whether the project needs a capability, a better algorithm, or a product
+    gain. This turn seeds those angles; it proposes no tasks and casts no vote."""
+    juez = by_id("juez")
+    return (
+        f"You are the **{juez.name_en}** of the Council of Sages, speaking BEFORE "
+        f"the six engineer-sages debate. They will default to refactoring and "
+        f"tech-debt — structure, simplification, validation, performance. That "
+        f"lens is necessary but NARROW: it never asks whether the project needs a "
+        f"new capability, a better algorithm, a product/UX gain, or deeper "
+        f"security — only whether the existing code is cleaner.\n\n"
+        f"## Your mandate\n{juez.expertise_en}\n\n"
+        f"## Your job here: WIDEN THE LENS\n"
+        f"Frame the problem from the USER / PRODUCT / STRATEGIC angle so the "
+        f"engineers debate the WHOLE space, not just hygiene. Use Read/Glob/Grep "
+        f"to ground yourself in what this project actually IS and DOES before "
+        f"framing — read the highest-priority files in the repo map. You are NOT "
+        f"proposing tasks and NOT voting; you are seeding questions and angles the "
+        f"engineers would otherwise miss.\n\n"
+        f"Output ONLY the JSON object matching the schema. No prose outside."
+    )
+
+
+def _juez_framing_user_message(atasco: str, repo: Path, repo_brief: str = "") -> str:
+    brief = f"<repo_map>\n{repo_brief}\n</repo_map>\n\n" if repo_brief else ""
+    return (
+        f"<atasco>{atasco}</atasco>\n"
+        f"<repo>{repo.resolve()}</repo>\n\n"
+        f"{brief}"
+        f"Frame this debate for the council. Read the highest-priority files in "
+        f"the map to understand what the project DOES (not just its code shape), "
+        f"then emit:\n"
+        f"- `product_questions`: 3-5 sharp user/product/strategic questions.\n"
+        f"- `missed_angles`: 2-4 CONCRETE improvements BEYOND refactoring "
+        f"(a feature, an algorithm, a UX/product gain, deeper security) this "
+        f"codebase plausibly needs — the things an all-engineer debate skips. "
+        f"Ground each in a real file or capability you saw.\n\n"
+        f"Output ONLY the JSON object matching this schema:\n"
+        f"```json\n{json.dumps(FRAMING_SCHEMA, indent=2)}\n```\n"
+        f"No prose outside, no markdown fences."
+    )
+
+
+def render_framing(framing: dict) -> str:
+    """Format the Strategist's framing for injection into every debater's turn."""
+    if not isinstance(framing, dict):
+        return ""
+    qs = [str(q) for q in (framing.get("product_questions") or []) if q]
+    angs = [str(a) for a in (framing.get("missed_angles") or []) if a]
+    lines: list[str] = []
+    if qs:
+        lines.append("Preguntas de producto/estrategia a tener presentes:")
+        lines += [f"- {q}" for q in qs]
+    if angs:
+        if lines:
+            lines.append("")
+        lines.append("Ángulos NO-refactor que un consejo solo-ingeniería suele "
+                     "omitir (considéralos para el plan, no solo limpieza):")
+        lines += [f"- {a}" for a in angs]
+    return "\n".join(lines)
 
 
