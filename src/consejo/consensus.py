@@ -184,6 +184,7 @@ async def consensus_dialogue(
         failed_in_round = 0
         round_output_tokens = 0
         round_secs = 0.0
+        plan_changed_this_round = False
         for i, sage in enumerate(round_order, start=1):
             turn_counter += 1
             user_msg = _consensus_turn_user_message(
@@ -230,6 +231,8 @@ async def consensus_dialogue(
             diff = turn_out.get("plan_diff") or {}
             if (diff.get("add") or diff.get("amend")):
                 contributed.add(sage.id)
+            if diff.get("add") or diff.get("amend") or diff.get("remove"):
+                plan_changed_this_round = True   # invalida firmas previas de la ronda
             plan = _apply_plan_diff(plan, diff)
             vote = turn_out.get("vote") or {}
             # Server-side enforcement of friction discipline. The model knows
@@ -309,9 +312,17 @@ async def consensus_dialogue(
                 f"[sage-fail]/[empty-result-retry] arriba."
             )
 
+        # Ronda estable: converge SOLO en una ronda donde todos firman Y nadie
+        # tocó el plan. Una ronda unánime que aún enmendó el plan deja firmas
+        # RANCIAS (emitidas contra un plan anterior) — se da una ronda más para
+        # que los sabios re-confirmen, o SE RETRACTEN, sobre el plan congelado.
         if r >= min_rounds and _is_unanimous(plan, votes, sage_ids):
-            converged_at_round = r
-            break
+            if not plan_changed_this_round:
+                converged_at_round = r
+                break
+            print(f"[convergence] ronda {r} unánime pero el plan cambió esta "
+                  f"ronda — una ronda más para confirmar/retractar sobre plan "
+                  f"estable.", file=sys.stderr)
 
     unanimous = converged_at_round is not None
 
