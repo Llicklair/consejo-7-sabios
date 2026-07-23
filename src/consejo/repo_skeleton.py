@@ -668,10 +668,10 @@ def _render_connectivity(graph: "DepGraph", top_n: int = 15,
     coupled = sorted((p for p, n in graph.fan_out.items() if n > 0),
                      key=lambda p: graph.fan_out[p], reverse=True)[:top_n]
     out = ["## 🔗 Conectividad (grafo de imports internos)", ""]
-    out.append(f"**Hubs** (más importados — tocarlos arrastra a muchos):")
+    out.append("**Hubs** (más importados — tocarlos arrastra a muchos):")
     out += [f"- `{p}` ← {graph.fan_in[p]} archivos" for p in hubs] or ["- —"]
     out.append("")
-    out.append(f"**Más acoplados** (más dependencias internas salientes):")
+    out.append("**Más acoplados** (más dependencias internas salientes):")
     out += [f"- `{p}` → {graph.fan_out[p]} archivos" for p in coupled] or ["- —"]
     out.append("")
     if graph.cycles:
@@ -766,7 +766,7 @@ def render_skeleton_brief(skeletons: list[FileSkeleton],
     lines = [
         f"Mapa estructural determinista del repo: {len(skeletons)} archivos, "
         f"{total_loc} loc.",
-        "Lenguajes: " + ", ".join(f"{l}={n}" for l, n in by_lang.most_common()),
+        "Lenguajes: " + ", ".join(f"{lang}={n}" for lang, n in by_lang.most_common()),
         "Por directorio raíz: " + ", ".join(
             f"{d}={n}" for d, n in by_dir.most_common(15)),
     ]

@@ -24,7 +24,7 @@ from .council_prompts import (
 )
 from .driver_protocol import SageDriver
 from .repo_skeleton import render_coverage
-from .sages import Sage, by_id
+from .sages import Sage
 from .schemas import (
     FRAMING_SCHEMA,
     TURN_SCHEMA,
