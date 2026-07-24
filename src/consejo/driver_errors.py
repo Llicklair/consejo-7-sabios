@@ -50,7 +50,7 @@ class DriverProcessError(DriverError):
         self.stderr_head = stderr_head
         self.stdout_head = stdout_head
         self.context = context or {}
-        rc_signed = returncode - 2**32 if returncode > 2**31 else returncode
+        rc_signed = returncode - 2**32 if returncode >= 2**31 else returncode
         diag = (f"returncode={returncode} (signed={rc_signed}) "
                 f"stderr_len={stderr_len} stdout_len={stdout_len}")
         if self.context:
