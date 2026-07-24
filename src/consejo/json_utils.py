@@ -24,7 +24,13 @@ def _extract_json_object(text: str) -> dict:
         s = re.sub(r"^```(?:json)?\s*\n?", "", s)
         s = re.sub(r"\n?```\s*$", "", s)
     try:
-        return json.loads(s)
+        obj = json.loads(s)
+        if not isinstance(obj, dict):
+            # A bare list/scalar isn't a JSON object; fall through to the
+            # brace-scan so an embedded object (e.g. '[{"plan": 1}]') can
+            # still be recovered instead of returning a non-dict.
+            raise json.JSONDecodeError("parsed value is not an object", s, 0)
+        return obj
     except json.JSONDecodeError:
         pass
     start = s.find("{")
@@ -48,5 +54,11 @@ def _extract_json_object(text: str) -> dict:
             elif c == "}":
                 depth -= 1
                 if depth == 0:
-                    return json.loads(s[start:i + 1])
+                    obj = json.loads(s[start:i + 1])
+                    if not isinstance(obj, dict):
+                        # Belt-and-suspenders: a balanced {...} scan should
+                        # always yield a dict, but guard anyway so this
+                        # function never returns a non-dict.
+                        raise json.JSONDecodeError("scanned value is not an object", s, start)
+                    return obj
     raise json.JSONDecodeError("unbalanced braces", s, start)
