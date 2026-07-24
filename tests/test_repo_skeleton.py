@@ -231,9 +231,15 @@ def test_git_churn_counts_commits(tmp_path):
     git("init")
     git("config", "user.email", "t@t.test")
     git("config", "user.name", "tester")
-    _mk(tmp_path, "a.py", "x = 1\n"); git("add", "-A"); git("commit", "-m", "1")
-    _mk(tmp_path, "a.py", "x = 2\n"); git("add", "-A"); git("commit", "-m", "2")
-    _mk(tmp_path, "b.py", "y = 1\n"); git("add", "-A"); git("commit", "-m", "3")
+    _mk(tmp_path, "a.py", "x = 1\n")
+    git("add", "-A")
+    git("commit", "-m", "1")
+    _mk(tmp_path, "a.py", "x = 2\n")
+    git("add", "-A")
+    git("commit", "-m", "2")
+    _mk(tmp_path, "b.py", "y = 1\n")
+    git("add", "-A")
+    git("commit", "-m", "3")
     churn = git_churn(tmp_path)
     assert churn.get("a.py") == 2   # touched in 2 commits
     assert churn.get("b.py") == 1
